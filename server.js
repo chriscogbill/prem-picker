@@ -44,10 +44,11 @@ app.use(cors({
   credentials: true
 }));
 
+const isProduction = process.env.NODE_ENV === 'production';
 const cookieConfig = {
-  secure: process.env.NODE_ENV === 'production',
+  secure: isProduction,
   httpOnly: true,
-  sameSite: 'lax',
+  sameSite: isProduction ? 'none' : 'lax', // 'none' required for cross-subdomain fetch with credentials
   maxAge: 24 * 60 * 60 * 1000
 };
 
