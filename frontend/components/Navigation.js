@@ -75,8 +75,8 @@ export default function Navigation() {
           <div className="flex h-14 justify-between">
             <div className="flex">
               <div className="flex-shrink-0 flex items-center">
-                <Link href="/" className="text-xl font-bold text-primary-600">
-                  PL Picker
+                <Link href="/">
+                  <img src="/logo.svg" alt="PL Picker" className="h-8" />
                 </Link>
               </div>
               <div className="hidden sm:ml-8 sm:flex sm:space-x-8 items-center">
