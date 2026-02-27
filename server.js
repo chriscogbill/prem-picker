@@ -136,12 +136,93 @@ app.get('/', (req, res) => {
     name: 'Prem Picker API',
     version: '1.0.0',
     endpoints: {
+      auth: '/api/auth',
       games: '/api/games',
       fixtures: '/api/fixtures',
       teams: '/api/teams',
       settings: '/api/settings',
       health: '/health'
     }
+  });
+});
+
+// ============================================
+// Auth proxy routes
+// Forwards auth requests to cogs-auth server-to-server,
+// then sets the session locally so the cookie comes from
+// this origin (api-plpicker.cogs.tech) — avoids cross-origin cookie issues.
+// ============================================
+const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:3002';
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const authResponse = await fetch(`${AUTH_SERVICE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body)
+    });
+    const data = await authResponse.json();
+
+    if (authResponse.ok && data.success && data.user) {
+      req.session.userId = data.user.userId;
+      req.session.email = data.user.email;
+      req.session.username = data.user.username;
+      req.session.role = data.user.role;
+    }
+
+    res.status(authResponse.status).json(data);
+  } catch (error) {
+    console.error('Auth proxy error (login):', error);
+    res.status(502).json({ success: false, error: 'Auth service unavailable' });
+  }
+});
+
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const authResponse = await fetch(`${AUTH_SERVICE_URL}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body)
+    });
+    const data = await authResponse.json();
+
+    if (authResponse.ok && data.success && data.user) {
+      req.session.userId = data.user.userId;
+      req.session.email = data.user.email;
+      req.session.username = data.user.username;
+      req.session.role = data.user.role;
+    }
+
+    res.status(authResponse.status).json(data);
+  } catch (error) {
+    console.error('Auth proxy error (register):', error);
+    res.status(502).json({ success: false, error: 'Auth service unavailable' });
+  }
+});
+
+app.get('/api/auth/me', (req, res) => {
+  if (req.session?.userId) {
+    res.json({
+      success: true,
+      user: {
+        userId: req.session.userId,
+        email: req.session.email,
+        username: req.session.username,
+        role: req.session.role || 'user'
+      }
+    });
+  } else {
+    res.status(401).json({ success: false, error: 'Not authenticated' });
+  }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      return res.status(500).json({ success: false, error: 'Logout failed' });
+    }
+    res.clearCookie('connect.sid');
+    res.json({ success: true, message: 'Logged out' });
   });
 });
 

@@ -1,5 +1,4 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
-const AUTH_BASE_URL = process.env.NEXT_PUBLIC_AUTH_URL || 'http://localhost:3002';
 
 class ApiClient {
   async request(endpoint, options = {}) {
@@ -28,53 +27,27 @@ class ApiClient {
     }
   }
 
-  async authRequest(endpoint, options = {}) {
-    const url = `${AUTH_BASE_URL}${endpoint}`;
-
-    try {
-      const response = await fetch(url, {
-        ...options,
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Auth request failed');
-      }
-
-      return data;
-    } catch (error) {
-      console.error('Auth Error:', error);
-      throw error;
-    }
-  }
-
   // Auth
   async register(email, username, password) {
-    return this.authRequest('/api/auth/register', {
+    return this.request('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email, username, password }),
     });
   }
 
   async login(email, password) {
-    return this.authRequest('/api/auth/login', {
+    return this.request('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
   }
 
   async logout() {
-    return this.authRequest('/api/auth/logout', { method: 'POST' });
+    return this.request('/api/auth/logout', { method: 'POST' });
   }
 
   async getCurrentUser() {
-    return this.authRequest('/api/auth/me');
+    return this.request('/api/auth/me');
   }
 
   // Games
