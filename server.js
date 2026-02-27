@@ -168,6 +168,11 @@ app.post('/api/auth/login', async (req, res) => {
       req.session.email = data.user.email;
       req.session.username = data.user.username;
       req.session.role = data.user.role;
+
+      // Explicitly save session to ensure Set-Cookie header is sent
+      await new Promise((resolve, reject) => {
+        req.session.save((err) => err ? reject(err) : resolve());
+      });
     }
 
     res.status(authResponse.status).json(data);
@@ -191,6 +196,11 @@ app.post('/api/auth/register', async (req, res) => {
       req.session.email = data.user.email;
       req.session.username = data.user.username;
       req.session.role = data.user.role;
+
+      // Explicitly save session to ensure Set-Cookie header is sent
+      await new Promise((resolve, reject) => {
+        req.session.save((err) => err ? reject(err) : resolve());
+      });
     }
 
     res.status(authResponse.status).json(data);
