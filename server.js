@@ -28,6 +28,10 @@ const settingsRouter = require('./src/routes/settings');
 const app = express();
 const PORT = process.env.PORT || 3003;
 
+// Trust Railway's reverse proxy so req.protocol reports 'https' correctly
+// (required for Secure cookies to be set behind a proxy)
+app.set('trust proxy', 1);
+
 // ============================================
 // Middleware
 // ============================================
