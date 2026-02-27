@@ -100,9 +100,25 @@ app.use((req, res, next) => {
 app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT NOW()');
+    let authDbStatus = 'unknown';
+    let sessionCount = 0;
+    try {
+      const sessResult = await authPool.query('SELECT COUNT(*) as cnt FROM session');
+      sessionCount = sessResult.rows[0].cnt;
+      authDbStatus = 'connected';
+    } catch (authErr) {
+      authDbStatus = `error: ${authErr.message}`;
+    }
     res.json({
       status: 'healthy',
       database: 'connected',
+      authDatabase: authDbStatus,
+      sessionCount,
+      sessionInfo: {
+        hasSessionId: !!req.sessionID,
+        hasUserId: !!req.session?.userId,
+        cookieHeader: req.headers.cookie ? 'present' : 'missing'
+      },
       timestamp: new Date().toISOString()
     });
   } catch (error) {
