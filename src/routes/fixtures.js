@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/connection');
 const { requireAdmin } = require('../middleware/requireAuth');
-const { getCurrentSeason } = require('../helpers/settings');
+const { getCurrentSeason, autoDetectGameweek, updateSetting } = require('../helpers/settings');
 
 // GET /api/teams - List PL teams for current season
 router.get('/teams', async (req, res) => {
@@ -78,7 +78,7 @@ router.get('/:gameweek/deadline', async (req, res) => {
 router.post('/import', requireAdmin, async (req, res) => {
   try {
     const apiKey = process.env.FOOTBALL_DATA_API_KEY;
-    if (!apiKey || apiKey === 'your-key-here') {
+    if (!apiKey || apiKey === 'your-key-here' || apiKey === 'your-api-key-here') {
       return res.status(400).json({ success: false, error: 'FOOTBALL_DATA_API_KEY not configured' });
     }
 
@@ -154,6 +154,13 @@ router.post('/import', requireAdmin, async (req, res) => {
       fixturesImported++;
     }
 
+    // Auto-update current_season and current_gameweek settings
+    await updateSetting(pool, 'current_season', season);
+    const detectedGw = await autoDetectGameweek(pool, season);
+    if (detectedGw != null) {
+      await updateSetting(pool, 'current_gameweek', detectedGw);
+    }
+
     res.json({
       success: true,
       message: `Imported ${teamsImported} teams and ${fixturesImported} fixtures for season ${season}/${season + 1}`
@@ -168,7 +175,7 @@ router.post('/import', requireAdmin, async (req, res) => {
 router.post('/update-results', requireAdmin, async (req, res) => {
   try {
     const apiKey = process.env.FOOTBALL_DATA_API_KEY;
-    if (!apiKey || apiKey === 'your-key-here') {
+    if (!apiKey || apiKey === 'your-key-here' || apiKey === 'your-api-key-here') {
       return res.status(400).json({ success: false, error: 'FOOTBALL_DATA_API_KEY not configured' });
     }
 
@@ -194,6 +201,12 @@ router.post('/update-results', requireAdmin, async (req, res) => {
         [match.score.fullTime.home, match.score.fullTime.away, match.id]
       );
       updated += result.rowCount;
+    }
+
+    // Auto-update current_gameweek after results update
+    const detectedGw = await autoDetectGameweek(pool, season);
+    if (detectedGw != null) {
+      await updateSetting(pool, 'current_gameweek', detectedGw);
     }
 
     res.json({

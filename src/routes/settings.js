@@ -2,8 +2,9 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/connection');
 const { requireAdmin } = require('../middleware/requireAuth');
+const { getCurrentSeason, autoDetectGameweek } = require('../helpers/settings');
 
-// GET /api/settings - Get all settings
+// GET /api/settings - Get all settings (with auto-detected gameweek)
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
@@ -20,6 +21,13 @@ router.get('/', async (req, res) => {
         updated_at: row.updated_at
       };
     });
+
+    // Auto-detect gameweek from fixture dates if fixtures exist
+    const season = parseInt(settings.current_season?.value) || 2024;
+    const detectedGw = await autoDetectGameweek(pool, season);
+    if (detectedGw != null) {
+      settings.current_gameweek.value = String(detectedGw);
+    }
 
     res.json({ success: true, settings });
   } catch (error) {
@@ -44,10 +52,21 @@ router.get('/:key', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Setting not found' });
     }
 
+    let value = result.rows[0].setting_value;
+
+    // Auto-detect gameweek from fixture dates
+    if (key === 'current_gameweek') {
+      const season = await getCurrentSeason(pool);
+      const detectedGw = await autoDetectGameweek(pool, season);
+      if (detectedGw != null) {
+        value = String(detectedGw);
+      }
+    }
+
     res.json({
       success: true,
       key,
-      value: result.rows[0].setting_value,
+      value,
       description: result.rows[0].description,
       updated_at: result.rows[0].updated_at
     });

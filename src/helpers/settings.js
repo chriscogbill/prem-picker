@@ -12,4 +12,45 @@ async function getCurrentGameweek(pool) {
   return parseInt(result.rows[0]?.setting_value) || 1;
 }
 
-module.exports = { getCurrentSeason, getCurrentGameweek };
+// Auto-detect current gameweek from fixture dates
+// Returns the earliest gameweek with unfinished matches, or null if no fixtures exist
+async function autoDetectGameweek(pool, season) {
+  const result = await pool.query(
+    `SELECT MIN(gameweek) AS current_gw
+     FROM pl_fixtures
+     WHERE season = $1 AND status != 'finished'`,
+    [season]
+  );
+
+  if (result.rows[0]?.current_gw != null) {
+    return result.rows[0].current_gw;
+  }
+
+  // If all matches are finished, check if there are any fixtures at all
+  const countResult = await pool.query(
+    'SELECT COUNT(*) AS total FROM pl_fixtures WHERE season = $1',
+    [season]
+  );
+
+  if (parseInt(countResult.rows[0].total) > 0) {
+    // All fixtures finished — return the last gameweek
+    const lastGw = await pool.query(
+      'SELECT MAX(gameweek) AS last_gw FROM pl_fixtures WHERE season = $1',
+      [season]
+    );
+    return lastGw.rows[0].last_gw;
+  }
+
+  // No fixtures at all — can't auto-detect
+  return null;
+}
+
+// Update a setting in the database
+async function updateSetting(pool, key, value) {
+  await pool.query(
+    `UPDATE app_settings SET setting_value = $1, updated_at = CURRENT_TIMESTAMP WHERE setting_key = $2`,
+    [String(value), key]
+  );
+}
+
+module.exports = { getCurrentSeason, getCurrentGameweek, autoDetectGameweek, updateSetting };
