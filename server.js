@@ -1,0 +1,192 @@
+const express = require('express');
+const cors = require('cors');
+const session = require('express-session');
+const pgSession = require('connect-pg-simple')(session);
+const { Pool } = require('pg');
+const pool = require('./src/db/connection');
+
+// Separate pool for the shared auth/session database (cogsAuth)
+const authPool = process.env.AUTH_DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.AUTH_DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+    })
+  : new Pool({
+      user: process.env.DB_USER || 'chriscogbill',
+      host: process.env.DB_HOST || 'localhost',
+      database: process.env.AUTH_DB_NAME || 'cogsAuth',
+      password: process.env.DB_PASSWORD || '',
+      port: parseInt(process.env.DB_PORT || '5432'),
+    });
+
+// Import routes
+const gamesRouter = require('./src/routes/games');
+const picksRouter = require('./src/routes/picks');
+const fixturesRouter = require('./src/routes/fixtures');
+const settingsRouter = require('./src/routes/settings');
+
+const app = express();
+const PORT = process.env.PORT || 3003;
+
+// ============================================
+// Middleware
+// ============================================
+
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3004,http://localhost:3002').split(',');
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
+
+const cookieConfig = {
+  secure: process.env.NODE_ENV === 'production',
+  httpOnly: true,
+  sameSite: 'lax',
+  maxAge: 24 * 60 * 60 * 1000
+};
+
+if (process.env.COOKIE_DOMAIN) {
+  cookieConfig.domain = process.env.COOKIE_DOMAIN;
+}
+
+app.use(session({
+  store: new pgSession({
+    pool: authPool,
+    tableName: 'session',
+    createTableIfMissing: true
+  }),
+  secret: process.env.SESSION_SECRET || 'cogs-shared-session-secret-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: cookieConfig
+}));
+
+app.use(express.json());
+
+// Lazy sync: ensure authenticated users have a profile in the local user_profiles table
+app.use(async (req, res, next) => {
+  if (req.session?.userId && req.session?.email) {
+    try {
+      await pool.query(
+        `INSERT INTO user_profiles (user_id, email, username, full_name)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (email) DO UPDATE SET username = EXCLUDED.username, full_name = EXCLUDED.full_name`,
+        [req.session.userId, req.session.email, req.session.username || req.session.email, null]
+      );
+    } catch (err) {
+      console.error('User profile sync error:', err.message);
+    }
+  }
+  next();
+});
+
+// Request logging
+app.use((req, res, next) => {
+  const sessionInfo = req.session?.userId ? `[User: ${req.session.email}]` : '[Not authenticated]';
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path} ${sessionInfo}`);
+  next();
+});
+
+// ============================================
+// Routes
+// ============================================
+
+app.get('/health', async (req, res) => {
+  try {
+    await pool.query('SELECT NOW()');
+    res.json({
+      status: 'healthy',
+      database: 'connected',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'unhealthy',
+      database: 'disconnected',
+      error: error.message
+    });
+  }
+});
+
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Prem Picker API',
+    version: '1.0.0',
+    endpoints: {
+      games: '/api/games',
+      fixtures: '/api/fixtures',
+      teams: '/api/teams',
+      settings: '/api/settings',
+      health: '/health'
+    }
+  });
+});
+
+app.use('/api/games', gamesRouter);
+app.use('/api/fixtures', fixturesRouter);
+app.use('/api/settings', settingsRouter);
+// Picks are nested under games: /api/games/:id/picks, /api/games/:id/my-picks, etc.
+// Mounted in games router
+
+// ============================================
+// Error Handling
+// ============================================
+
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Endpoint not found',
+    path: req.path
+  });
+});
+
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : (err.message || 'Internal server error')
+  });
+});
+
+// ============================================
+// Server Startup
+// ============================================
+
+app.listen(PORT, async () => {
+  console.log('\n===========================================');
+  console.log('Prem Picker API');
+  console.log('===========================================');
+  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+
+  try {
+    const result = await pool.query('SELECT COUNT(*) as game_count FROM games');
+    console.log(`✓ Database connected (${result.rows[0].game_count} games)`);
+  } catch (error) {
+    console.error('✗ Database connection failed:', error.message);
+  }
+
+  console.log('\nAvailable endpoints:');
+  console.log('  GET  /health                          - Health check');
+  console.log('  GET  /api/games                       - List games');
+  console.log('  POST /api/games                       - Create game');
+  console.log('  GET  /api/games/:id                   - Game details');
+  console.log('  GET  /api/games/:id/standings          - Game standings');
+  console.log('  POST /api/games/:id/picks              - Submit pick');
+  console.log('  GET  /api/fixtures/:gameweek            - Gameweek fixtures');
+  console.log('  GET  /api/teams                        - PL teams');
+  console.log('===========================================\n');
+});
+
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, closing server...');
+  await pool.end();
+  await authPool.end();
+  process.exit(0);
+});
