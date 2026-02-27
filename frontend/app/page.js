@@ -118,7 +118,7 @@ export default function HomePage() {
           </div>
           <div className="flex gap-3">
             <span className="font-bold text-primary-600 shrink-0">3.</span>
-            <p>You <strong>can't pick the same team twice</strong> (until you've used all 20).</p>
+            <p>You <strong>can't pick the same team twice</strong> (unless you've used all available teams already).</p>
           </div>
           <div className="flex gap-3">
             <span className="font-bold text-primary-600 shrink-0">4.</span>
