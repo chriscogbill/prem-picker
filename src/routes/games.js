@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/connection');
 const { requireAuth, requireAdmin, requireGameAdmin } = require('../middleware/requireAuth');
-const { getCurrentSeason, getCurrentGameweek } = require('../helpers/settings');
+const { getCurrentSeason, getCurrentGameweek, getGameweekOverride, isDeadlineOverridden } = require('../helpers/settings');
 const picksRouter = require('./picks');
 
 // Mount picks routes under /api/games/:id/
@@ -282,8 +282,23 @@ router.get('/:id/history', async (req, res) => {
   try {
     const { id } = req.params;
     const season = await getCurrentSeason(pool);
-    const currentGameweek = await getCurrentGameweek(pool);
     const requestingUser = req.session?.email;
+
+    // Use gameweek override if set (testing mode), otherwise auto-detect
+    const gwOverride = await getGameweekOverride(pool);
+    let currentGameweek;
+    if (gwOverride != null) {
+      currentGameweek = gwOverride;
+    } else {
+      currentGameweek = await getCurrentGameweek(pool);
+      // Also try auto-detect from fixtures
+      const { autoDetectGameweek } = require('../helpers/settings');
+      const detected = await autoDetectGameweek(pool, season);
+      if (detected != null) currentGameweek = detected;
+    }
+
+    // Check deadline override (testing mode)
+    const deadlineOverride = await isDeadlineOverridden(pool);
 
     // Get the game to know the start_gameweek
     const gameResult = await pool.query('SELECT start_gameweek FROM games WHERE game_id = $1', [id]);
@@ -327,7 +342,8 @@ router.get('/:id/history', async (req, res) => {
       const gw = row.gameweek;
       if (!history[gw]) {
         const deadline = deadlines[gw];
-        const deadlinePassed = deadline ? new Date(deadline) < now : false;
+        // If deadline override is on, treat all deadlines as NOT passed
+        const deadlinePassed = deadlineOverride ? false : (deadline ? new Date(deadline) < now : false);
         history[gw] = { deadlinePassed, picks: [] };
       }
 

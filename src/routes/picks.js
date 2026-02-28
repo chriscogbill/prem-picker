@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router({ mergeParams: true });
 const pool = require('../db/connection');
 const { requireAuth, requireAdmin } = require('../middleware/requireAuth');
-const { getCurrentSeason, getCurrentGameweek } = require('../helpers/settings');
+const { getCurrentSeason, getCurrentGameweek, getGameweekOverride, isDeadlineOverridden, autoDetectGameweek } = require('../helpers/settings');
 
 // GET /api/games/:id/my-picks - Get my picks in this game
 router.get('/my-picks', requireAuth, async (req, res) => {
@@ -48,7 +48,8 @@ router.get('/picks/:gameweek', async (req, res) => {
     const { gameweek } = req.params;
     const season = await getCurrentSeason(pool);
 
-    // Check if deadline has passed
+    // Check if deadline has passed (respect override for testing)
+    const deadlineOverride = await isDeadlineOverridden(pool);
     const deadlineResult = await pool.query(
       `SELECT MIN(match_date) AS deadline
        FROM pl_fixtures
@@ -57,7 +58,7 @@ router.get('/picks/:gameweek', async (req, res) => {
     );
 
     const deadline = deadlineResult.rows[0]?.deadline;
-    const deadlinePassed = deadline ? new Date(deadline) < new Date() : false;
+    const deadlinePassed = deadlineOverride ? false : (deadline ? new Date(deadline) < new Date() : false);
 
     if (!deadlinePassed) {
       // Don't reveal picks before deadline
@@ -105,7 +106,16 @@ router.post('/picks', requireAuth, async (req, res) => {
     }
 
     const season = await getCurrentSeason(pool);
-    const currentGameweek = await getCurrentGameweek(pool);
+
+    // Use gameweek override if set (testing mode), otherwise auto-detect
+    const gwOverride = await getGameweekOverride(pool);
+    let currentGameweek;
+    if (gwOverride != null) {
+      currentGameweek = gwOverride;
+    } else {
+      const detected = await autoDetectGameweek(pool, season);
+      currentGameweek = detected != null ? detected : await getCurrentGameweek(pool);
+    }
 
     // 1. Check game exists and is active
     const gameResult = await pool.query('SELECT * FROM games WHERE game_id = $1', [gameId]);
@@ -136,16 +146,19 @@ router.post('/picks', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, error: 'You have been eliminated from this game' });
     }
 
-    // 3. Check deadline hasn't passed
-    const deadlineResult = await pool.query(
-      `SELECT MIN(match_date) AS deadline
-       FROM pl_fixtures
-       WHERE gameweek = $1 AND season = $2 AND match_date IS NOT NULL`,
-      [currentGameweek, season]
-    );
-    const deadline = deadlineResult.rows[0]?.deadline;
-    if (deadline && new Date(deadline) < new Date()) {
-      return res.status(400).json({ success: false, error: 'Deadline has passed for this gameweek' });
+    // 3. Check deadline hasn't passed (skip if deadline override is on)
+    const deadlineOverride = await isDeadlineOverridden(pool);
+    if (!deadlineOverride) {
+      const deadlineResult = await pool.query(
+        `SELECT MIN(match_date) AS deadline
+         FROM pl_fixtures
+         WHERE gameweek = $1 AND season = $2 AND match_date IS NOT NULL`,
+        [currentGameweek, season]
+      );
+      const deadline = deadlineResult.rows[0]?.deadline;
+      if (deadline && new Date(deadline) < new Date()) {
+        return res.status(400).json({ success: false, error: 'Deadline has passed for this gameweek' });
+      }
     }
 
     // 4. Check team has a fixture this gameweek

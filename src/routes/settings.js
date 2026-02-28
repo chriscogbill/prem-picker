@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/connection');
 const { requireAdmin } = require('../middleware/requireAuth');
-const { getCurrentSeason, autoDetectGameweek } = require('../helpers/settings');
+const { getCurrentSeason, autoDetectGameweek, getGameweekOverride, isDeadlineOverridden } = require('../helpers/settings');
 
 // GET /api/settings - Get all settings (with auto-detected gameweek)
 router.get('/', async (req, res) => {
@@ -22,12 +22,27 @@ router.get('/', async (req, res) => {
       };
     });
 
-    // Auto-detect gameweek from fixture dates if fixtures exist
-    const season = parseInt(settings.current_season?.value) || 2024;
-    const detectedGw = await autoDetectGameweek(pool, season);
-    if (detectedGw != null) {
-      settings.current_gameweek.value = String(detectedGw);
+    // Check for gameweek override first (testing mode)
+    const gwOverride = await getGameweekOverride(pool);
+    if (gwOverride != null) {
+      settings.current_gameweek.value = String(gwOverride);
+    } else {
+      // Auto-detect gameweek from fixture dates if fixtures exist
+      const season = parseInt(settings.current_season?.value) || 2024;
+      const detectedGw = await autoDetectGameweek(pool, season);
+      if (detectedGw != null) {
+        settings.current_gameweek.value = String(detectedGw);
+      }
     }
+
+    // Include override/testing flags in response
+    const deadlineOvr = await isDeadlineOverridden(pool);
+    settings._testing = {
+      value: JSON.stringify({
+        gameweekOverride: gwOverride,
+        deadlineOverride: deadlineOvr,
+      })
+    };
 
     res.json({ success: true, settings });
   } catch (error) {
@@ -54,12 +69,17 @@ router.get('/:key', async (req, res) => {
 
     let value = result.rows[0].setting_value;
 
-    // Auto-detect gameweek from fixture dates
+    // Auto-detect gameweek from fixture dates (or use override)
     if (key === 'current_gameweek') {
-      const season = await getCurrentSeason(pool);
-      const detectedGw = await autoDetectGameweek(pool, season);
-      if (detectedGw != null) {
-        value = String(detectedGw);
+      const gwOverride = await getGameweekOverride(pool);
+      if (gwOverride != null) {
+        value = String(gwOverride);
+      } else {
+        const season = await getCurrentSeason(pool);
+        const detectedGw = await autoDetectGameweek(pool, season);
+        if (detectedGw != null) {
+          value = String(detectedGw);
+        }
       }
     }
 
@@ -77,26 +97,24 @@ router.get('/:key', async (req, res) => {
 });
 
 // PUT /api/settings/:key - Update setting (admin only)
+// Creates the setting if it doesn't exist (upsert)
 router.put('/:key', requireAdmin, async (req, res) => {
   try {
     const { key } = req.params;
     const { value } = req.body;
 
-    if (!value && value !== 0) {
+    if (value === undefined || value === null) {
       return res.status(400).json({ success: false, error: 'value is required' });
     }
 
     const result = await pool.query(
-      `UPDATE app_settings
-       SET setting_value = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE setting_key = $2
+      `INSERT INTO app_settings (setting_key, setting_value)
+       VALUES ($1, $2)
+       ON CONFLICT (setting_key) DO UPDATE SET
+         setting_value = EXCLUDED.setting_value, updated_at = CURRENT_TIMESTAMP
        RETURNING *`,
-      [value, key]
+      [key, String(value)]
     );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Setting not found' });
-    }
 
     res.json({
       success: true,

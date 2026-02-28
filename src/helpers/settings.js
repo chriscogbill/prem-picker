@@ -12,6 +12,32 @@ async function getCurrentGameweek(pool) {
   return parseInt(result.rows[0]?.setting_value) || 1;
 }
 
+/**
+ * Check if the gameweek override is set.
+ * Returns the override value (integer) or null if not set.
+ */
+async function getGameweekOverride(pool) {
+  const result = await pool.query(
+    "SELECT setting_value FROM app_settings WHERE setting_key = 'gameweek_override'"
+  );
+  const val = result.rows[0]?.setting_value;
+  if (val && val !== '' && val !== '0') {
+    return parseInt(val);
+  }
+  return null;
+}
+
+/**
+ * Check if deadline override is enabled.
+ * When true, all deadlines are treated as NOT passed (for testing).
+ */
+async function isDeadlineOverridden(pool) {
+  const result = await pool.query(
+    "SELECT setting_value FROM app_settings WHERE setting_key = 'deadline_override'"
+  );
+  return result.rows[0]?.setting_value === 'true';
+}
+
 // Auto-detect current gameweek from fixture dates
 // Returns the earliest gameweek with unfinished matches, or null if no fixtures exist
 async function autoDetectGameweek(pool, season) {
@@ -53,4 +79,4 @@ async function updateSetting(pool, key, value) {
   );
 }
 
-module.exports = { getCurrentSeason, getCurrentGameweek, autoDetectGameweek, updateSetting };
+module.exports = { getCurrentSeason, getCurrentGameweek, autoDetectGameweek, updateSetting, getGameweekOverride, isDeadlineOverridden };

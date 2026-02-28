@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/connection');
 const { requireAdmin } = require('../middleware/requireAuth');
-const { getCurrentSeason, autoDetectGameweek, updateSetting } = require('../helpers/settings');
+const { getCurrentSeason, autoDetectGameweek, updateSetting, isDeadlineOverridden } = require('../helpers/settings');
 
 // GET /api/teams - List PL teams for current season
 router.get('/teams', async (req, res) => {
@@ -62,11 +62,12 @@ router.get('/:gameweek/deadline', async (req, res) => {
     );
 
     const deadline = result.rows[0]?.deadline;
+    const deadlineOverride = await isDeadlineOverridden(pool);
     res.json({
       success: true,
       gameweek: parseInt(gameweek),
       deadline,
-      isPast: deadline ? new Date(deadline) < new Date() : null
+      isPast: deadlineOverride ? false : (deadline ? new Date(deadline) < new Date() : null)
     });
   } catch (error) {
     console.error('Error fetching deadline:', error);
