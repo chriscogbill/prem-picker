@@ -24,6 +24,7 @@ const gamesRouter = require('./src/routes/games');
 const picksRouter = require('./src/routes/picks');
 const fixturesRouter = require('./src/routes/fixtures');
 const settingsRouter = require('./src/routes/settings');
+const { startResultsCron } = require('./src/cron/resultsCron');
 
 const app = express();
 const PORT = process.env.PORT || 3003;
@@ -283,6 +284,9 @@ app.listen(PORT, async () => {
   } catch (error) {
     console.error('✗ Database connection failed:', error.message);
   }
+
+  // Start automated results cron job
+  startResultsCron();
 
   console.log('\nAvailable endpoints:');
   console.log('  GET  /health                          - Health check');

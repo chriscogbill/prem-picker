@@ -8,7 +8,11 @@
     "dev": "node --watch server.js",
     "import:fixtures": "node scripts/importFixtures.js"
   },
-  "keywords": ["premier-league", "last-man-standing", "api"],
+  "keywords": [
+    "premier-league",
+    "last-man-standing",
+    "api"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
@@ -17,6 +21,7 @@
     "cors": "^2.8.5",
     "express": "^4.22.1",
     "express-session": "^1.18.2",
+    "node-cron": "^4.2.1",
     "node-fetch": "^3.3.2",
     "pg": "^8.16.3"
   }
