@@ -12,6 +12,7 @@ export default function GameDetailPage() {
   const [game, setGame] = useState(null);
   const [players, setPlayers] = useState([]);
   const [history, setHistory] = useState({});
+  const [startGameweek, setStartGameweek] = useState(1);
   const [loadingData, setLoadingData] = useState(true);
   const [starting, setStarting] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -38,6 +39,7 @@ export default function GameDetailPage() {
       setGame(gameData.game);
       setPlayers(gameData.players);
       setHistory(historyData.history || {});
+      setStartGameweek(historyData.startGameweek || gameData.game.start_gameweek || 1);
     } catch (error) {
       console.error('Error loading game:', error);
     } finally {
@@ -94,21 +96,25 @@ export default function GameDetailPage() {
   const isGameAdmin = user && (user.email === game.admin_email || user.role === 'admin');
   const myPlayer = players.find(p => p.user_email === user?.email);
 
-  const statusColors = {
-    winner: 'text-warning-600 font-bold',
-    alive: 'text-positive-600 font-semibold',
-    drawn: 'text-warning-600 font-semibold',
-    eliminated: 'text-danger-500',
-  };
+  // Build the list of gameweeks that have activity (picks or are in range)
+  const historyGws = Object.keys(history).map(Number);
+  const maxGw = Math.max(startGameweek, ...historyGws, currentGameweek || 0);
+  const gameweeks = [];
+  for (let gw = startGameweek; gw <= maxGw; gw++) {
+    gameweeks.push(gw);
+  }
 
-  const statusBg = {
-    winner: 'bg-warning-50',
-    alive: 'bg-positive-50',
-    drawn: 'bg-warning-50',
-    eliminated: '',
-  };
+  // Build a lookup: playerEmail -> gameweek -> pick info
+  const pickLookup = {};
+  players.forEach(p => { pickLookup[p.user_email] = {}; });
 
-  const gameweeks = Object.keys(history).map(Number).sort((a, b) => b - a);
+  Object.entries(history).forEach(([gw, gwData]) => {
+    const gwNum = parseInt(gw);
+    gwData.picks.forEach(pick => {
+      if (!pickLookup[pick.user_email]) pickLookup[pick.user_email] = {};
+      pickLookup[pick.user_email][gwNum] = pick;
+    });
+  });
 
   return (
     <div className="space-y-6">
@@ -182,88 +188,114 @@ export default function GameDetailPage() {
         </div>
       )}
 
-      {/* Standings Table */}
+      {/* Standings Table — gameweek grid */}
       <div className="card">
         <h2 className="font-bold text-lg mb-4">Standings</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-200">
-                <th className="text-left py-2 px-3">#</th>
-                <th className="text-left py-2 px-3">Player</th>
-                <th className="text-left py-2 px-3">Status</th>
-                <th className="text-center py-2 px-3">Eliminated GW</th>
-                <th className="text-center py-2 px-3">Picks Made</th>
-                <th className="text-center py-2 px-3">Teams Used</th>
-              </tr>
-            </thead>
-            <tbody>
-              {players.map((player, idx) => (
-                <tr key={player.player_id} className={`border-b border-gray-100 ${statusBg[player.status] || ''}`}>
-                  <td className="py-2 px-3 text-gray-400">{idx + 1}</td>
-                  <td className="py-2 px-3 font-medium">
-                    {player.username}
-                    {player.user_email === user?.email && (
-                      <span className="text-xs text-gray-400 ml-1">(you)</span>
-                    )}
-                  </td>
-                  <td className={`py-2 px-3 capitalize ${statusColors[player.status] || ''}`}>
-                    {player.status === 'winner' ? 'Winner!' : player.status}
-                  </td>
-                  <td className="py-2 px-3 text-center">
-                    {player.eliminated_gameweek || '-'}
-                  </td>
-                  <td className="py-2 px-3 text-center">{player.picks_made}</td>
-                  <td className="py-2 px-3 text-center">{player.teams_used || 0}/20</td>
+        {gameweeks.length > 0 && game.status !== 'open' ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b-2 border-gray-200">
+                  <th className="text-left py-2 px-3 sticky left-0 bg-white z-10 min-w-[140px]">Player</th>
+                  {gameweeks.map(gw => (
+                    <th key={gw} className="text-center py-2 px-2 min-w-[70px] whitespace-nowrap">
+                      GW{gw}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+              </thead>
+              <tbody>
+                {players.map(player => {
+                  const isEliminated = player.status === 'eliminated';
+                  const isWinner = player.status === 'winner';
+                  const isDrawn = player.status === 'drawn';
 
-      {/* Gameweek History */}
-      {gameweeks.length > 0 && (
-        <div className="card">
-          <h2 className="font-bold text-lg mb-4">Pick History</h2>
-          <div className="space-y-4">
-            {gameweeks.map(gw => (
-              <details key={gw} className="border border-gray-200 rounded-lg" open={gw === gameweeks[0]}>
-                <summary className="px-4 py-3 cursor-pointer font-medium text-gray-700 hover:bg-gray-50">
-                  Gameweek {gw}
-                </summary>
-                <div className="px-4 pb-3">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200">
-                        <th className="text-left py-1">Player</th>
-                        <th className="text-left py-1">Pick</th>
-                        <th className="text-left py-1">Opponent</th>
-                        <th className="text-center py-1">Result</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {history[gw].map(pick => (
-                        <tr key={pick.pick_id} className="border-b border-gray-50">
-                          <td className="py-1.5">{pick.username}</td>
-                          <td className="py-1.5 font-medium">{pick.team_name}</td>
-                          <td className="py-1.5 text-gray-500">{pick.opponent || '-'}</td>
-                          <td className="py-1.5 text-center">
-                            {pick.result === 'win' && <span className="text-positive-600 font-bold">W</span>}
-                            {pick.result === 'draw' && <span className="text-warning-600 font-bold">D</span>}
-                            {pick.result === 'loss' && <span className="text-danger-600 font-bold">L</span>}
-                            {!pick.result && <span className="text-gray-400">-</span>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </details>
-            ))}
+                  return (
+                    <tr key={player.player_id} className="border-b border-gray-100">
+                      <td className={`py-2 px-3 font-medium sticky left-0 bg-white z-10 ${
+                        isEliminated ? 'line-through text-gray-400' :
+                        isWinner ? 'text-warning-600 font-bold' :
+                        isDrawn ? 'text-warning-600' : ''
+                      }`}>
+                        {player.username}
+                        {player.user_email === user?.email && (
+                          <span className="text-xs text-gray-400 ml-1 no-underline">(you)</span>
+                        )}
+                        {isWinner && <span className="ml-1 text-xs">🏆</span>}
+                      </td>
+                      {gameweeks.map(gw => {
+                        const pick = pickLookup[player.user_email]?.[gw];
+                        const gwData = history[gw];
+
+                        return (
+                          <PickCell
+                            key={gw}
+                            pick={pick}
+                            gwData={gwData}
+                            player={player}
+                            gw={gw}
+                          />
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="text-center text-gray-500 py-4">
+            {game.status === 'open'
+              ? 'Game hasn\'t started yet — waiting for players.'
+              : 'No picks yet.'}
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+function PickCell({ pick, gwData, player, gw }) {
+  // No pick data at all for this gameweek
+  if (!pick) {
+    // If the player was already eliminated before this GW, show empty
+    if (player.status === 'eliminated' && player.eliminated_gameweek && gw > player.eliminated_gameweek) {
+      return <td className="py-2 px-2 text-center text-gray-200">—</td>;
+    }
+    // Player is alive but hasn't picked yet (or GW hasn't started)
+    return <td className="py-2 px-2 text-center text-gray-300">-</td>;
+  }
+
+  // Pick is hidden (deadline not passed, not own pick)
+  if (pick.hidden) {
+    return (
+      <td className="py-2 px-2 text-center">
+        <span className="inline-block w-6 h-6 bg-gray-200 rounded text-xs leading-6 text-gray-400" title="Pick hidden until deadline">
+          ?
+        </span>
+      </td>
+    );
+  }
+
+  // Pick is visible
+  const resultColors = {
+    win: 'bg-positive-100 text-positive-800',
+    loss: 'bg-danger-100 text-danger-800 line-through',
+    draw: 'bg-danger-100 text-danger-800 line-through',
+  };
+
+  const style = pick.result
+    ? resultColors[pick.result] || 'bg-gray-100 text-gray-700'
+    : 'bg-gray-100 text-gray-700';
+
+  return (
+    <td className="py-2 px-2 text-center">
+      <span
+        className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${style}`}
+        title={pick.team_name || ''}
+      >
+        {pick.team_short || pick.team_name || '?'}
+      </span>
+    </td>
   );
 }

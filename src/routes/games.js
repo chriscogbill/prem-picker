@@ -277,50 +277,93 @@ router.get('/:id/standings', async (req, res) => {
   }
 });
 
-// GET /api/games/:id/history - Get pick history per gameweek
+// GET /api/games/:id/history - Get pick history per gameweek (deadline-aware)
 router.get('/:id/history', async (req, res) => {
   try {
     const { id } = req.params;
+    const season = await getCurrentSeason(pool);
     const currentGameweek = await getCurrentGameweek(pool);
+    const requestingUser = req.session?.email;
 
+    // Get the game to know the start_gameweek
+    const gameResult = await pool.query('SELECT start_gameweek FROM games WHERE game_id = $1', [id]);
+    if (gameResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Game not found' });
+    }
+    const startGw = gameResult.rows[0].start_gameweek;
+
+    // Get deadlines for all gameweeks that have fixtures
+    const deadlinesResult = await pool.query(
+      `SELECT gameweek, MIN(match_date) AS deadline
+       FROM pl_fixtures
+       WHERE season = $1 AND match_date IS NOT NULL
+       GROUP BY gameweek
+       ORDER BY gameweek`,
+      [season]
+    );
+    const deadlines = {};
+    deadlinesResult.rows.forEach(row => {
+      deadlines[row.gameweek] = row.deadline;
+    });
+
+    // Get all picks for this game
     const result = await pool.query(
       `SELECT p.pick_id, p.gameweek, p.result,
-              gp.username, gp.user_email, gp.status AS player_status,
-              t.name AS team_name, t.short_name AS team_short,
-              -- Get the fixture for this pick's team in this gameweek
-              CASE
-                WHEN f_home.fixture_id IS NOT NULL THEN
-                  CONCAT(at_away.short_name, ' (H)')
-                WHEN f_away.fixture_id IS NOT NULL THEN
-                  CONCAT(ht_home.short_name, ' (A)')
-              END AS opponent
+              gp.player_id, gp.username, gp.user_email, gp.status AS player_status,
+              t.name AS team_name, t.short_name AS team_short
        FROM picks p
        JOIN game_players gp ON p.game_player_id = gp.player_id
        JOIN pl_teams t ON p.pl_team_id = t.team_id
-       LEFT JOIN pl_fixtures f_home ON f_home.home_team_id = p.pl_team_id
-         AND f_home.gameweek = p.gameweek AND f_home.season = (SELECT setting_value::int FROM app_settings WHERE setting_key = 'current_season')
-       LEFT JOIN pl_teams at_away ON f_home.away_team_id = at_away.team_id
-       LEFT JOIN pl_fixtures f_away ON f_away.away_team_id = p.pl_team_id
-         AND f_away.gameweek = p.gameweek AND f_away.season = (SELECT setting_value::int FROM app_settings WHERE setting_key = 'current_season')
-       LEFT JOIN pl_teams ht_home ON f_away.home_team_id = ht_home.team_id
        WHERE p.game_id = $1
-       ORDER BY p.gameweek DESC, gp.username`,
+       ORDER BY p.gameweek, gp.username`,
       [id]
     );
 
-    // Group by gameweek
+    // Group by gameweek, applying deadline visibility
     const history = {};
+    const now = new Date();
+
     result.rows.forEach(row => {
-      if (!history[row.gameweek]) {
-        history[row.gameweek] = [];
+      const gw = row.gameweek;
+      if (!history[gw]) {
+        const deadline = deadlines[gw];
+        const deadlinePassed = deadline ? new Date(deadline) < now : false;
+        history[gw] = { deadlinePassed, picks: [] };
       }
-      history[row.gameweek].push(row);
+
+      const isOwnPick = row.user_email === requestingUser;
+
+      if (history[gw].deadlinePassed || isOwnPick) {
+        // Show the pick (team visible)
+        history[gw].picks.push({
+          pick_id: row.pick_id,
+          player_id: row.player_id,
+          username: row.username,
+          user_email: row.user_email,
+          team_name: row.team_name,
+          team_short: row.team_short,
+          result: row.result,
+        });
+      } else {
+        // Deadline not passed and not own pick: hide team but show that a pick was made
+        history[gw].picks.push({
+          pick_id: row.pick_id,
+          player_id: row.player_id,
+          username: row.username,
+          user_email: row.user_email,
+          team_name: null,
+          team_short: null,
+          result: null,
+          hidden: true,
+        });
+      }
     });
 
     res.json({
       success: true,
       history,
-      currentGameweek
+      currentGameweek,
+      startGameweek: startGw,
     });
   } catch (error) {
     console.error('Error fetching game history:', error);
