@@ -1,13 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams } from 'next/navigation';
-import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '../../../lib/AuthContext';
 import { api } from '../../../lib/api';
 
 export default function GameDetailPage() {
   const { id } = useParams();
+  const router = useRouter();
   const { user, loading, currentGameweek } = useAuth();
   const [game, setGame] = useState(null);
   const [players, setPlayers] = useState([]);
@@ -128,13 +128,6 @@ export default function GameDetailPage() {
              game.is_draw ? 'Completed - Draw' : 'Completed'}
           </p>
         </div>
-        <div className="flex gap-2">
-          {game.status === 'active' && myPlayer?.status === 'alive' && (
-            <Link href={`/games/${id}/pick`} className="btn-primary">
-              Make Pick
-            </Link>
-          )}
-        </div>
       </div>
 
       {message && (
@@ -226,6 +219,7 @@ export default function GameDetailPage() {
                       {gameweeks.map(gw => {
                         const pick = pickLookup[player.user_email]?.[gw];
                         const gwData = history[gw];
+                        const isCurrentUser = player.user_email === user?.email;
 
                         return (
                           <PickCell
@@ -234,6 +228,10 @@ export default function GameDetailPage() {
                             gwData={gwData}
                             player={player}
                             gw={gw}
+                            isCurrentUser={isCurrentUser}
+                            currentGameweek={currentGameweek}
+                            gameId={id}
+                            router={router}
                           />
                         );
                       })}
@@ -255,12 +253,29 @@ export default function GameDetailPage() {
   );
 }
 
-function PickCell({ pick, gwData, player, gw }) {
+function PickCell({ pick, gwData, player, gw, isCurrentUser, currentGameweek, gameId, router }) {
+  const isCurrentGw = gw === currentGameweek;
+  const deadlineNotPassed = gwData ? !gwData.deadlinePassed : true;
+  const canPick = isCurrentUser && isCurrentGw && deadlineNotPassed && player.status === 'alive';
+
   // No pick data at all for this gameweek
   if (!pick) {
     // If the player was already eliminated before this GW, show empty
     if (player.status === 'eliminated' && player.eliminated_gameweek && gw > player.eliminated_gameweek) {
       return <td className="py-2 px-2 text-center text-gray-200">—</td>;
+    }
+    // Current user can make a pick for this GW
+    if (canPick) {
+      return (
+        <td className="py-2 px-2 text-center">
+          <button
+            onClick={() => router.push(`/games/${gameId}/pick`)}
+            className="inline-block px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap bg-primary-500 text-white hover:bg-primary-600 cursor-pointer"
+          >
+            Pick
+          </button>
+        </td>
+      );
     }
     // Player is alive but hasn't picked yet (or GW hasn't started)
     return <td className="py-2 px-2 text-center text-gray-300">-</td>;
@@ -287,6 +302,26 @@ function PickCell({ pick, gwData, player, gw }) {
   const style = pick.result
     ? resultColors[pick.result] || 'bg-gray-100 text-gray-700'
     : 'bg-gray-100 text-gray-700';
+
+  // Current user's own pick, still before deadline — show pick + change option
+  if (canPick && !pick.result) {
+    return (
+      <td className="py-2 px-2 text-center">
+        <span
+          className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${style}`}
+          title={pick.team_name || ''}
+        >
+          {pick.team_short || pick.team_name || '?'}
+        </span>
+        <button
+          onClick={() => router.push(`/games/${gameId}/pick`)}
+          className="block mx-auto mt-0.5 text-[10px] text-primary-500 hover:text-primary-700 cursor-pointer"
+        >
+          Change
+        </button>
+      </td>
+    );
+  }
 
   return (
     <td className="py-2 px-2 text-center">
