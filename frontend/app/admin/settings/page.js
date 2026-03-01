@@ -39,17 +39,24 @@ export default function AdminSettingsPage() {
     }
   }
 
-  async function handleImportFixtures() {
-    setImporting(true);
+  const [importingFull, setImportingFull] = useState(false);
+
+  async function handleImportFixtures(fullSeason = false) {
+    if (fullSeason) {
+      setImportingFull(true);
+    } else {
+      setImporting(true);
+    }
     setMessage('');
     setError('');
     try {
-      const result = await api.importFixtures(currentSeason);
+      const result = await api.importFixtures(currentSeason, !fullSeason);
       setMessage(result.message);
     } catch (err) {
       setError(err.message || 'Failed to import fixtures');
     } finally {
       setImporting(false);
+      setImportingFull(false);
     }
   }
 
@@ -133,13 +140,20 @@ export default function AdminSettingsPage() {
         <p className="text-sm text-gray-600 mb-4">
           Import fixtures from football-data.org or update results for completed matches.
         </p>
-        <div className="flex gap-3">
+        <div className="flex gap-3 flex-wrap">
           <button
-            onClick={handleImportFixtures}
-            disabled={importing}
+            onClick={() => handleImportFixtures(false)}
+            disabled={importing || importingFull}
             className="btn-primary disabled:bg-gray-400"
           >
-            {importing ? 'Importing...' : 'Import Fixtures'}
+            {importing ? 'Importing...' : 'Import Upcoming'}
+          </button>
+          <button
+            onClick={() => handleImportFixtures(true)}
+            disabled={importing || importingFull}
+            className="btn-secondary disabled:bg-gray-400"
+          >
+            {importingFull ? 'Importing...' : 'Import Full Season'}
           </button>
           <button
             onClick={handleUpdateResults}

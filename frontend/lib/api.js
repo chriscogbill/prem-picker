@@ -109,6 +109,31 @@ class ApiClient {
     });
   }
 
+  async deleteGame(id) {
+    return this.request(`/api/games/${id}`, { method: 'DELETE' });
+  }
+
+  async addPlayer(gameId, email, username) {
+    return this.request(`/api/games/${gameId}/add-player`, {
+      method: 'POST',
+      body: JSON.stringify({ email, username }),
+    });
+  }
+
+  async importPick(gameId, playerEmail, gameweek, teamShortName) {
+    return this.request(`/api/games/${gameId}/import-pick`, {
+      method: 'POST',
+      body: JSON.stringify({ playerEmail, gameweek, teamShortName }),
+    });
+  }
+
+  async setPlayerStatus(gameId, playerEmail, status, eliminatedGameweek) {
+    return this.request(`/api/games/${gameId}/set-player-status`, {
+      method: 'POST',
+      body: JSON.stringify({ playerEmail, status, eliminatedGameweek }),
+    });
+  }
+
   // Fixtures
   async getFixtures(gameweek, params = {}) {
     const query = new URLSearchParams(params).toString();
@@ -125,10 +150,10 @@ class ApiClient {
     return this.request(`/api/fixtures/teams?${query}`);
   }
 
-  async importFixtures(season) {
+  async importFixtures(season, upcomingOnly = true) {
     return this.request('/api/fixtures/import', {
       method: 'POST',
-      body: JSON.stringify({ season }),
+      body: JSON.stringify({ season, upcomingOnly }),
     });
   }
 

@@ -138,47 +138,22 @@ export default function GameDetailPage() {
 
       {/* Admin controls */}
       {isGameAdmin && (
-        <div className="card bg-gray-50">
-          <h2 className="font-bold mb-3">Admin Controls</h2>
-
-          {game.invite_code && (
-            <div className="mb-4">
-              <span className="text-sm text-gray-600">Invite Code: </span>
-              <span className="font-mono font-bold text-primary-600">{game.invite_code}</span>
-              <button onClick={copyInviteCode} className="ml-2 text-xs text-link-600 hover:underline cursor-pointer">
-                {copied ? 'Copied!' : 'Copy'}
-              </button>
-            </div>
-          )}
-
-          <div className="flex gap-3 flex-wrap items-end">
-            {game.status === 'open' && (
-              <button onClick={handleStart} disabled={starting} className="btn-success disabled:bg-gray-400">
-                {starting ? 'Starting...' : 'Start Game'}
-              </button>
-            )}
-
-            {game.status === 'active' && (
-              <div className="flex gap-2 items-end">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Process GW</label>
-                  <select
-                    value={processGw}
-                    onChange={(e) => setProcessGw(parseInt(e.target.value))}
-                    className="px-2 py-1.5 border border-gray-300 rounded text-sm"
-                  >
-                    {Array.from({ length: 38 }, (_, i) => i + 1).map(gw => (
-                      <option key={gw} value={gw}>GW {gw}</option>
-                    ))}
-                  </select>
-                </div>
-                <button onClick={handleProcessResults} disabled={processing} className="btn-primary text-sm disabled:bg-gray-400">
-                  {processing ? 'Processing...' : 'Process Results'}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+        <AdminPanel
+          game={game}
+          id={id}
+          players={players}
+          copied={copied}
+          copyInviteCode={copyInviteCode}
+          starting={starting}
+          handleStart={handleStart}
+          processing={processing}
+          processGw={processGw}
+          setProcessGw={setProcessGw}
+          handleProcessResults={handleProcessResults}
+          setMessage={setMessage}
+          loadData={loadData}
+          router={router}
+        />
       )}
 
       {/* Standings Table — gameweek grid */}
@@ -249,6 +224,291 @@ export default function GameDetailPage() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handleStart, processing, processGw, setProcessGw, handleProcessResults, setMessage, loadData, router }) {
+  const [showManage, setShowManage] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Add player
+  const [addEmail, setAddEmail] = useState('');
+  const [addUsername, setAddUsername] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  // Import pick
+  const [pickEmail, setPickEmail] = useState('');
+  const [pickGw, setPickGw] = useState(game.start_gameweek || 1);
+  const [pickTeam, setPickTeam] = useState('');
+  const [importing, setImporting] = useState(false);
+
+  // Player status
+  const [statusEmail, setStatusEmail] = useState('');
+  const [statusValue, setStatusValue] = useState('alive');
+  const [statusGw, setStatusGw] = useState('');
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await api.deleteGame(id);
+      router.push('/games');
+    } catch (error) {
+      setMessage(error.message || 'Failed to delete game');
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleAddPlayer() {
+    setAdding(true);
+    try {
+      const result = await api.addPlayer(id, addEmail, addUsername || undefined);
+      setMessage(result.message);
+      setAddEmail('');
+      setAddUsername('');
+      loadData();
+    } catch (error) {
+      setMessage(error.message || 'Failed to add player');
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function handleImportPick() {
+    setImporting(true);
+    try {
+      const result = await api.importPick(id, pickEmail, pickGw, pickTeam);
+      setMessage(result.message);
+      setPickTeam('');
+      loadData();
+    } catch (error) {
+      setMessage(error.message || 'Failed to import pick');
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function handleSetStatus() {
+    setUpdatingStatus(true);
+    try {
+      const result = await api.setPlayerStatus(id, statusEmail, statusValue, statusGw || undefined);
+      setMessage(result.message);
+      loadData();
+    } catch (error) {
+      setMessage(error.message || 'Failed to update status');
+    } finally {
+      setUpdatingStatus(false);
+    }
+  }
+
+  return (
+    <div className="card bg-gray-50">
+      <div className="flex justify-between items-center mb-3">
+        <h2 className="font-bold">Admin Controls</h2>
+        <button
+          onClick={() => setShowManage(!showManage)}
+          className="text-xs text-link-600 hover:underline cursor-pointer"
+        >
+          {showManage ? 'Hide Management' : 'Manage Game'}
+        </button>
+      </div>
+
+      {game.invite_code && (
+        <div className="mb-4">
+          <span className="text-sm text-gray-600">Invite Code: </span>
+          <span className="font-mono font-bold text-primary-600">{game.invite_code}</span>
+          <button onClick={copyInviteCode} className="ml-2 text-xs text-link-600 hover:underline cursor-pointer">
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+        </div>
+      )}
+
+      <div className="flex gap-3 flex-wrap items-end">
+        {game.status === 'open' && (
+          <button onClick={handleStart} disabled={starting} className="btn-success disabled:bg-gray-400">
+            {starting ? 'Starting...' : 'Start Game'}
+          </button>
+        )}
+
+        {game.status === 'active' && (
+          <div className="flex gap-2 items-end">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Process GW</label>
+              <select
+                value={processGw}
+                onChange={(e) => setProcessGw(parseInt(e.target.value))}
+                className="px-2 py-1.5 border border-gray-300 rounded text-sm"
+              >
+                {Array.from({ length: 38 }, (_, i) => i + 1).map(gw => (
+                  <option key={gw} value={gw}>GW {gw}</option>
+                ))}
+              </select>
+            </div>
+            <button onClick={handleProcessResults} disabled={processing} className="btn-primary text-sm disabled:bg-gray-400">
+              {processing ? 'Processing...' : 'Process Results'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Expandable management panel */}
+      {showManage && (
+        <div className="mt-4 pt-4 border-t border-gray-200 space-y-5">
+
+          {/* Add Player */}
+          <div>
+            <h3 className="text-sm font-semibold mb-2">Add Player</h3>
+            <div className="flex gap-2 flex-wrap items-end">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={addEmail}
+                  onChange={(e) => setAddEmail(e.target.value)}
+                  placeholder="player@example.com"
+                  className="px-2 py-1.5 border border-gray-300 rounded text-sm w-56"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Username (optional)</label>
+                <input
+                  type="text"
+                  value={addUsername}
+                  onChange={(e) => setAddUsername(e.target.value)}
+                  placeholder="Display name"
+                  className="px-2 py-1.5 border border-gray-300 rounded text-sm w-36"
+                />
+              </div>
+              <button onClick={handleAddPlayer} disabled={!addEmail || adding} className="btn-primary text-sm disabled:bg-gray-400">
+                {adding ? 'Adding...' : 'Add'}
+              </button>
+            </div>
+          </div>
+
+          {/* Import Pick */}
+          <div>
+            <h3 className="text-sm font-semibold mb-2">Import Pick</h3>
+            <div className="flex gap-2 flex-wrap items-end">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Player</label>
+                <select
+                  value={pickEmail}
+                  onChange={(e) => setPickEmail(e.target.value)}
+                  className="px-2 py-1.5 border border-gray-300 rounded text-sm w-44"
+                >
+                  <option value="">Select player</option>
+                  {players.map(p => (
+                    <option key={p.player_id} value={p.user_email}>{p.username}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">GW</label>
+                <select
+                  value={pickGw}
+                  onChange={(e) => setPickGw(parseInt(e.target.value))}
+                  className="px-2 py-1.5 border border-gray-300 rounded text-sm w-20"
+                >
+                  {Array.from({ length: 38 }, (_, i) => i + 1).map(gw => (
+                    <option key={gw} value={gw}>{gw}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Team (e.g. ARS)</label>
+                <input
+                  type="text"
+                  value={pickTeam}
+                  onChange={(e) => setPickTeam(e.target.value.toUpperCase())}
+                  placeholder="ARS"
+                  className="px-2 py-1.5 border border-gray-300 rounded text-sm w-20 uppercase"
+                  maxLength={3}
+                />
+              </div>
+              <button onClick={handleImportPick} disabled={!pickEmail || !pickTeam || importing} className="btn-primary text-sm disabled:bg-gray-400">
+                {importing ? 'Importing...' : 'Import'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">Auto-calculates result if the fixture is finished.</p>
+          </div>
+
+          {/* Set Player Status */}
+          <div>
+            <h3 className="text-sm font-semibold mb-2">Set Player Status</h3>
+            <div className="flex gap-2 flex-wrap items-end">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Player</label>
+                <select
+                  value={statusEmail}
+                  onChange={(e) => setStatusEmail(e.target.value)}
+                  className="px-2 py-1.5 border border-gray-300 rounded text-sm w-44"
+                >
+                  <option value="">Select player</option>
+                  {players.map(p => (
+                    <option key={p.player_id} value={p.user_email}>{p.username} ({p.status})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Status</label>
+                <select
+                  value={statusValue}
+                  onChange={(e) => setStatusValue(e.target.value)}
+                  className="px-2 py-1.5 border border-gray-300 rounded text-sm"
+                >
+                  <option value="alive">Alive</option>
+                  <option value="eliminated">Eliminated</option>
+                  <option value="winner">Winner</option>
+                  <option value="drawn">Drawn</option>
+                </select>
+              </div>
+              {statusValue === 'eliminated' && (
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Elim. GW</label>
+                  <input
+                    type="number"
+                    value={statusGw}
+                    onChange={(e) => setStatusGw(e.target.value)}
+                    placeholder="GW"
+                    className="px-2 py-1.5 border border-gray-300 rounded text-sm w-16"
+                    min={1}
+                    max={38}
+                  />
+                </div>
+              )}
+              <button onClick={handleSetStatus} disabled={!statusEmail || updatingStatus} className="btn-primary text-sm disabled:bg-gray-400">
+                {updatingStatus ? 'Updating...' : 'Update'}
+              </button>
+            </div>
+          </div>
+
+          {/* Delete Game */}
+          <div className="pt-3 border-t border-gray-200">
+            {!confirmDelete ? (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="text-sm text-danger-600 hover:text-danger-800 cursor-pointer"
+              >
+                Delete this game
+              </button>
+            ) : (
+              <div className="flex gap-2 items-center">
+                <span className="text-sm text-danger-600 font-medium">Are you sure? This cannot be undone.</span>
+                <button onClick={handleDelete} disabled={deleting} className="px-3 py-1 bg-danger-600 text-white rounded text-sm hover:bg-danger-700 disabled:bg-gray-400 cursor-pointer">
+                  {deleting ? 'Deleting...' : 'Yes, Delete'}
+                </button>
+                <button onClick={() => setConfirmDelete(false)} className="px-3 py-1 bg-gray-200 rounded text-sm hover:bg-gray-300 cursor-pointer">
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

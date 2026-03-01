@@ -84,9 +84,10 @@ router.post('/import', requireAdmin, async (req, res) => {
     }
 
     const season = req.body.season || await getCurrentSeason(pool);
+    const upcomingOnly = req.body.upcomingOnly !== false; // default true
     const headers = { 'X-Auth-Token': apiKey };
 
-    // Fetch teams
+    // Fetch teams (always import all teams)
     const teamsResponse = await fetch(`https://api.football-data.org/v4/competitions/PL/teams?season=${season}`, { headers });
     if (!teamsResponse.ok) {
       const errorText = await teamsResponse.text();
@@ -106,16 +107,49 @@ router.post('/import', requireAdmin, async (req, res) => {
       teamsImported++;
     }
 
-    // Fetch fixtures
-    const matchesResponse = await fetch(`https://api.football-data.org/v4/competitions/PL/matches?season=${season}`, { headers });
-    if (!matchesResponse.ok) {
-      const errorText = await matchesResponse.text();
-      return res.status(matchesResponse.status).json({ success: false, error: `Football-data API error: ${errorText}` });
+    // Determine which gameweeks to import
+    let currentGw = null;
+    if (upcomingOnly) {
+      currentGw = await autoDetectGameweek(pool, season);
+      // If we can't detect, fall back to importing everything
     }
-    const matchesData = await matchesResponse.json();
+
+    // Fetch fixtures — use matchday filter if importing upcoming only and we know the current GW
+    let matchesUrl = `https://api.football-data.org/v4/competitions/PL/matches?season=${season}`;
+    if (upcomingOnly && currentGw) {
+      // Import current GW + next 2 GWs (covers the immediate upcoming period)
+      const fromGw = Math.max(1, currentGw);
+      const toGw = Math.min(38, currentGw + 2);
+      matchesUrl += `&matchday=${fromGw}`;
+      // football-data.org only supports single matchday filter, so fetch range by looping
+    }
+
+    // For upcoming-only with known GW, fetch just a few gameweeks
+    let allMatches = [];
+    if (upcomingOnly && currentGw) {
+      const fromGw = Math.max(1, currentGw);
+      const toGw = Math.min(38, currentGw + 2);
+      for (let gw = fromGw; gw <= toGw; gw++) {
+        const gwUrl = `https://api.football-data.org/v4/competitions/PL/matches?season=${season}&matchday=${gw}`;
+        const gwResponse = await fetch(gwUrl, { headers });
+        if (gwResponse.ok) {
+          const gwData = await gwResponse.json();
+          allMatches.push(...(gwData.matches || []));
+        }
+      }
+    } else {
+      // Full season import
+      const matchesResponse = await fetch(`https://api.football-data.org/v4/competitions/PL/matches?season=${season}`, { headers });
+      if (!matchesResponse.ok) {
+        const errorText = await matchesResponse.text();
+        return res.status(matchesResponse.status).json({ success: false, error: `Football-data API error: ${errorText}` });
+      }
+      const matchesData = await matchesResponse.json();
+      allMatches = matchesData.matches || [];
+    }
 
     let fixturesImported = 0;
-    for (const match of matchesData.matches) {
+    for (const match of allMatches) {
       // Look up team IDs by api_id
       const homeTeam = await pool.query(
         'SELECT team_id FROM pl_teams WHERE api_id = $1 AND season = $2',
@@ -162,9 +196,12 @@ router.post('/import', requireAdmin, async (req, res) => {
       await updateSetting(pool, 'current_gameweek', detectedGw);
     }
 
+    const gwRange = (upcomingOnly && currentGw)
+      ? ` (GW${currentGw}-${Math.min(38, currentGw + 2)})`
+      : ' (full season)';
     res.json({
       success: true,
-      message: `Imported ${teamsImported} teams and ${fixturesImported} fixtures for season ${season}/${season + 1}`
+      message: `Imported ${teamsImported} teams and ${fixturesImported} fixtures${gwRange} for season ${season}/${season + 1}`
     });
   } catch (error) {
     console.error('Error importing fixtures:', error);

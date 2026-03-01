@@ -387,4 +387,204 @@ router.get('/:id/history', async (req, res) => {
   }
 });
 
+// DELETE /api/games/:id - Delete a game (game admin or site admin only)
+router.delete('/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const gameResult = await pool.query('SELECT * FROM games WHERE game_id = $1', [id]);
+    if (gameResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Game not found' });
+    }
+
+    const game = gameResult.rows[0];
+
+    // Only game admin or site admin can delete
+    if (req.session.email !== game.admin_email && req.session.role !== 'admin') {
+      return res.status(403).json({ success: false, error: 'Only the game admin can delete this game' });
+    }
+
+    // CASCADE handles picks and game_players
+    await pool.query('DELETE FROM games WHERE game_id = $1', [id]);
+
+    res.json({
+      success: true,
+      message: `Game "${game.game_name}" deleted successfully`
+    });
+  } catch (error) {
+    console.error('Error deleting game:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/games/:id/add-player - Add a player to a game (game admin only)
+router.post('/:id/add-player', requireAuth, requireGameAdmin(), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { email, username } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'email is required' });
+    }
+
+    // Check if already a member
+    const existing = await pool.query(
+      'SELECT * FROM game_players WHERE game_id = $1 AND user_email = $2',
+      [id, email]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ success: false, error: 'Player is already in this game' });
+    }
+
+    // Use provided username, or try to look up from user_profiles, or use email prefix
+    let playerUsername = username;
+    if (!playerUsername) {
+      const profileResult = await pool.query(
+        'SELECT username FROM user_profiles WHERE email = $1',
+        [email]
+      );
+      playerUsername = profileResult.rows[0]?.username || email.split('@')[0];
+    }
+
+    const result = await pool.query(
+      `INSERT INTO game_players (game_id, user_email, username)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [id, email, playerUsername]
+    );
+
+    res.status(201).json({
+      success: true,
+      player: result.rows[0],
+      message: `Added ${playerUsername} to the game`
+    });
+  } catch (error) {
+    console.error('Error adding player:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/games/:id/import-pick - Import a pick for a player (game admin only, for retrospective entry)
+router.post('/:id/import-pick', requireAuth, requireGameAdmin(), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { playerEmail, gameweek, teamShortName } = req.body;
+
+    if (!playerEmail || !gameweek || !teamShortName) {
+      return res.status(400).json({ success: false, error: 'playerEmail, gameweek, and teamShortName are required' });
+    }
+
+    const season = await getCurrentSeason(pool);
+
+    // Look up player
+    const playerResult = await pool.query(
+      'SELECT player_id, username FROM game_players WHERE game_id = $1 AND user_email = $2',
+      [id, playerEmail]
+    );
+    if (playerResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Player not found in this game' });
+    }
+    const player = playerResult.rows[0];
+
+    // Look up team
+    const teamResult = await pool.query(
+      'SELECT team_id, name FROM pl_teams WHERE short_name = $1 AND season = $2',
+      [teamShortName.toUpperCase(), season]
+    );
+    if (teamResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: `Team "${teamShortName}" not found for season ${season}` });
+    }
+    const team = teamResult.rows[0];
+
+    // Check if team's fixture exists and determine result
+    const fixtureResult = await pool.query(
+      `SELECT home_team_id, away_team_id, home_score, away_score, status
+       FROM pl_fixtures
+       WHERE (home_team_id = $1 OR away_team_id = $1) AND gameweek = $2 AND season = $3`,
+      [team.team_id, gameweek, season]
+    );
+
+    let result = null;
+    if (fixtureResult.rows.length > 0 && fixtureResult.rows[0].status === 'finished') {
+      const f = fixtureResult.rows[0];
+      const isHome = f.home_team_id === team.team_id;
+      if (f.home_score > f.away_score) {
+        result = isHome ? 'win' : 'loss';
+      } else if (f.home_score < f.away_score) {
+        result = isHome ? 'loss' : 'win';
+      } else {
+        result = 'draw';
+      }
+    }
+
+    // Upsert pick
+    const pickResult = await pool.query(
+      `INSERT INTO picks (game_id, game_player_id, gameweek, pl_team_id, result)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (game_id, game_player_id, gameweek) DO UPDATE SET
+         pl_team_id = EXCLUDED.pl_team_id, result = EXCLUDED.result, created_at = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [id, player.player_id, gameweek, team.team_id, result]
+    );
+
+    res.json({
+      success: true,
+      pick: pickResult.rows[0],
+      message: `Imported pick: ${player.username} → ${team.name} (GW${gameweek})${result ? ` [${result}]` : ''}`
+    });
+  } catch (error) {
+    console.error('Error importing pick:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/games/:id/set-player-status - Update a player's status (game admin only)
+router.post('/:id/set-player-status', requireAuth, requireGameAdmin(), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { playerEmail, status, eliminatedGameweek } = req.body;
+
+    if (!playerEmail || !status) {
+      return res.status(400).json({ success: false, error: 'playerEmail and status are required' });
+    }
+
+    const validStatuses = ['alive', 'eliminated', 'winner', 'drawn'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+    }
+
+    const updateFields = ['status = $1'];
+    const values = [status, id, playerEmail];
+    let paramIndex = 4;
+
+    if (status === 'eliminated' && eliminatedGameweek) {
+      updateFields.push(`eliminated_gameweek = $${paramIndex}`);
+      values.push(eliminatedGameweek);
+      paramIndex++;
+    } else if (status === 'alive') {
+      updateFields.push('eliminated_gameweek = NULL', 'eliminated_pick_id = NULL');
+    }
+
+    const result = await pool.query(
+      `UPDATE game_players SET ${updateFields.join(', ')}
+       WHERE game_id = $2 AND user_email = $3
+       RETURNING *`,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Player not found in this game' });
+    }
+
+    res.json({
+      success: true,
+      player: result.rows[0],
+      message: `${result.rows[0].username} status set to ${status}`
+    });
+  } catch (error) {
+    console.error('Error updating player status:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 module.exports = router;
