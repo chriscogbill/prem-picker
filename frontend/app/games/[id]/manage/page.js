@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '../../../../lib/AuthContext';
 import { api } from '../../../../lib/api';
@@ -20,8 +20,6 @@ export default function ManagePage() {
 
   // Editable table data: array of { email, username, picks: { gw: teamShort } }
   const [tableData, setTableData] = useState([]);
-  const [pasteMode, setPasteMode] = useState(false);
-  const pasteRef = useRef(null);
 
   useEffect(() => {
     if (!loading) loadData();
@@ -98,41 +96,60 @@ export default function ManagePage() {
     setTableData(prev => prev.filter((_, i) => i !== index));
   }
 
-  // Handle paste from clipboard
-  function handlePaste(e) {
-    e.preventDefault();
+  // Column order: email, username, gw1, gw2, ...
+  const getColumns = useCallback(() => {
+    return ['email', 'username', ...gameweeks.map(String)];
+  }, [gameweeks]);
+
+  // Handle paste into any table cell — spreads across rows/columns from the focused cell
+  function handleTablePaste(e, rowIndex, colIndex) {
     const text = e.clipboardData.getData('text');
-    if (!text.trim()) return;
+    if (!text) return;
 
-    const lines = text.trim().split('\n');
-    const newRows = [];
+    const lines = text.split('\n').filter(l => l.length > 0);
+    // Only intercept multi-cell pastes (has tabs or multiple lines)
+    if (lines.length === 1 && !lines[0].includes('\t')) return;
 
-    for (const line of lines) {
-      const cells = line.split('\t');
-      if (cells.length < 1) continue;
+    e.preventDefault();
+    const columns = getColumns();
 
-      const email = (cells[0] || '').trim();
-      const username = (cells[1] || '').trim();
-      const picks = {};
+    setTableData(prev => {
+      const updated = [...prev];
 
-      // Remaining cells are picks for each gameweek in order
-      for (let i = 0; i < gameweeks.length && i + 2 < cells.length; i++) {
-        const val = (cells[i + 2] || '').trim().toUpperCase();
-        if (val) {
-          picks[gameweeks[i]] = val;
+      // Ensure enough rows exist
+      while (updated.length < rowIndex + lines.length) {
+        updated.push({ email: '', username: '', picks: {} });
+      }
+
+      for (let r = 0; r < lines.length; r++) {
+        const cells = lines[r].split('\t');
+        const targetRow = rowIndex + r;
+
+        for (let c = 0; c < cells.length; c++) {
+          const targetCol = colIndex + c;
+          if (targetCol >= columns.length) break;
+
+          const field = columns[targetCol];
+          const value = cells[c].trim();
+
+          if (field === 'email' || field === 'username') {
+            updated[targetRow] = { ...updated[targetRow], [field]: value };
+          } else {
+            const gw = parseInt(field);
+            updated[targetRow] = {
+              ...updated[targetRow],
+              picks: { ...updated[targetRow].picks, [gw]: value.toUpperCase() }
+            };
+          }
         }
       }
 
-      if (email) {
-        newRows.push({ email, username, picks });
-      }
-    }
+      return updated;
+    });
 
-    if (newRows.length > 0) {
-      setTableData(newRows);
-      setPasteMode(false);
-      showMessage(`Pasted ${newRows.length} rows. Review and click "Save All" to import.`, 'info');
-    }
+    const pastedRows = lines.length;
+    const pastedCols = Math.max(...lines.map(l => l.split('\t').length));
+    showMessage(`Pasted ${pastedRows} row(s) × ${pastedCols} column(s). Review and click "Save All" to import.`, 'info');
   }
 
   // Submit all data
@@ -209,18 +226,13 @@ export default function ManagePage() {
       <div className="card bg-gray-50">
         <h2 className="font-bold mb-2">Data Import</h2>
         <p className="text-sm text-gray-600 mb-2">
-          Edit the table below or paste data from a spreadsheet. Expected columns:
+          Edit the table below or paste data from a spreadsheet directly into any cell.
+          Multi-cell pastes will fill across rows and columns automatically.
         </p>
         <p className="text-xs text-gray-500 font-mono">
-          Email | Username | GW{gameweeks[0]} | GW{gameweeks[1]} | ... (use team short codes like ARS, CHE, LIV)
+          Columns: Email | Username | GW{gameweeks[0]} | GW{gameweeks[1]} | ... (use team short codes like ARS, CHE, LIV)
         </p>
         <div className="flex gap-2 mt-3">
-          <button
-            onClick={() => setPasteMode(!pasteMode)}
-            className="btn-secondary text-sm"
-          >
-            {pasteMode ? 'Cancel Paste' : 'Paste from Spreadsheet'}
-          </button>
           <button onClick={addRow} className="btn-secondary text-sm">
             + Add Row
           </button>
@@ -233,24 +245,6 @@ export default function ManagePage() {
           </button>
         </div>
       </div>
-
-      {/* Paste area */}
-      {pasteMode && (
-        <div className="card border-2 border-dashed border-primary-300 bg-primary-50">
-          <p className="text-sm text-primary-700 mb-2">Paste your spreadsheet data below (tab-separated):</p>
-          <textarea
-            ref={pasteRef}
-            onPaste={handlePaste}
-            className="w-full h-32 p-3 border border-gray-300 rounded text-sm font-mono"
-            placeholder="email@example.com&#9;Username&#9;ARS&#9;CHE&#9;LIV..."
-            autoFocus
-          />
-          <p className="text-xs text-gray-500 mt-1">
-            Columns: email, username, then one column per gameweek (GW{gameweeks.join(', GW')}).
-            Existing players (matched by email) will have their picks updated. New emails will be added as players.
-          </p>
-        </div>
-      )}
 
       {/* Editable table */}
       <div className="card p-0">
@@ -276,6 +270,7 @@ export default function ManagePage() {
                       type="email"
                       value={row.email}
                       onChange={e => updateCell(rowIndex, 'email', e.target.value)}
+                      onPaste={e => handleTablePaste(e, rowIndex, 0)}
                       className="w-full px-2 py-1 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
                       placeholder="email@example.com"
                     />
@@ -285,16 +280,18 @@ export default function ManagePage() {
                       type="text"
                       value={row.username}
                       onChange={e => updateCell(rowIndex, 'username', e.target.value)}
+                      onPaste={e => handleTablePaste(e, rowIndex, 1)}
                       className="w-full px-2 py-1 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
                       placeholder="Auto from email"
                     />
                   </td>
-                  {gameweeks.map(gw => (
+                  {gameweeks.map((gw, gwIndex) => (
                     <td key={gw} className="py-1 px-1">
                       <input
                         type="text"
                         value={row.picks[gw] || ''}
                         onChange={e => updateCell(rowIndex, String(gw), e.target.value)}
+                        onPaste={e => handleTablePaste(e, rowIndex, 2 + gwIndex)}
                         className="w-full px-1 py-1 border border-gray-200 rounded text-xs text-center uppercase focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
                         placeholder="-"
                         maxLength={3}
@@ -315,7 +312,7 @@ export default function ManagePage() {
               {tableData.length === 0 && (
                 <tr>
                   <td colSpan={gameweeks.length + 3} className="text-center py-8 text-gray-400">
-                    No data. Click "Add Row" or "Paste from Spreadsheet" to get started.
+                    No data. Click "+ Add Row" to get started, or paste spreadsheet data into the first cell.
                   </td>
                 </tr>
               )}
