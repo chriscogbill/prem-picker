@@ -124,8 +124,13 @@ export default function GameDetailPage() {
     if (aOrder !== bOrder) return aOrder - bOrder;
 
     // Among eliminated players, sort by eliminated_gameweek desc (lasted longest first)
+    // then by wins desc as tiebreaker
     if (a.status === 'eliminated' && b.status === 'eliminated') {
-      return (b.eliminated_gameweek || 0) - (a.eliminated_gameweek || 0);
+      const gwDiff = (b.eliminated_gameweek || 0) - (a.eliminated_gameweek || 0);
+      if (gwDiff !== 0) return gwDiff;
+      const aWins = Object.values(pickLookup[a.user_email] || {}).filter(p => p.result === 'win').length;
+      const bWins = Object.values(pickLookup[b.user_email] || {}).filter(p => p.result === 'win').length;
+      if (aWins !== bWins) return bWins - aWins;
     }
 
     // Among alive players, sort by number of wins desc

@@ -135,22 +135,16 @@ export default function PickPage() {
   const usedTeamIds = new Set(myPicks.filter(p => p.gameweek !== currentGameweek).map(p => p.team_id));
   const allUsed = usedTeamIds.size >= 20;
 
-  const fixtureMap = {};
-  for (const f of fixtures) {
-    fixtureMap[f.home_team_id] = { opponent: f.away_team, opponentShort: f.away_short, location: 'H', fixture: f };
-    fixtureMap[f.away_team_id] = { opponent: f.home_team, opponentShort: f.home_short, location: 'A', fixture: f };
-  }
+  const teamMap = {};
+  teams.forEach(t => { teamMap[t.team_id] = t; });
 
-  const teamsWithInfo = teams.map(t => ({
-    ...t,
-    fixture: fixtureMap[t.team_id],
-    isUsed: !allUsed && usedTeamIds.has(t.team_id),
-    hasFixture: !!fixtureMap[t.team_id],
-  })).sort((a, b) => {
-    if (a.isUsed !== b.isUsed) return a.isUsed ? 1 : -1;
-    if (a.hasFixture !== b.hasFixture) return a.hasFixture ? -1 : 1;
-    return a.name.localeCompare(b.name);
+  // Teams that have a fixture this gameweek (tracked to find those without)
+  const teamsWithFixture = new Set();
+  fixtures.forEach(f => {
+    teamsWithFixture.add(f.home_team_id);
+    teamsWithFixture.add(f.away_team_id);
   });
+  const teamsWithoutFixture = teams.filter(t => !teamsWithFixture.has(t.team_id));
 
   return (
     <div className="space-y-6">
@@ -199,56 +193,95 @@ export default function PickPage() {
         </div>
       )}
 
-      {/* Team selection */}
+      {/* Fixture-based team selection */}
       {!deadlinePassed ? (
         <div>
           <h2 className="font-bold mb-3">Select a team to win:</h2>
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {teamsWithInfo.map(team => {
-              const isSelected = selectedTeam === team.team_id;
-              const disabled = team.isUsed || !team.hasFixture;
+          <div className="space-y-3">
+            {fixtures.map(fixture => {
+              const homeTeam = teamMap[fixture.home_team_id];
+              const awayTeam = teamMap[fixture.away_team_id];
+              if (!homeTeam || !awayTeam) return null;
+
+              const homeUsed = !allUsed && usedTeamIds.has(fixture.home_team_id);
+              const awayUsed = !allUsed && usedTeamIds.has(fixture.away_team_id);
+              const homeSelected = selectedTeam === fixture.home_team_id;
+              const awaySelected = selectedTeam === fixture.away_team_id;
 
               return (
-                <button
-                  key={team.team_id}
-                  onClick={() => !disabled && setSelectedTeam(team.team_id)}
-                  disabled={disabled}
-                  className={`text-left p-4 rounded-lg border-2 transition-all cursor-pointer
-                    ${isSelected
-                      ? 'border-primary-500 bg-primary-50 shadow-md'
-                      : disabled
-                      ? 'border-gray-200 bg-gray-100 opacity-50 cursor-not-allowed'
-                      : 'border-gray-200 bg-white hover:border-primary-300 hover:shadow-sm'
-                    }
-                  `}
-                >
-                  <div className="flex items-center gap-3">
-                    {team.crest_url && (
-                      <img src={team.crest_url} alt="" className="w-8 h-8 object-contain" />
+                <div key={fixture.fixture_id} className="flex items-stretch rounded-lg border border-gray-200 overflow-hidden bg-white">
+                  {/* Home team */}
+                  <button
+                    onClick={() => !homeUsed && setSelectedTeam(fixture.home_team_id)}
+                    disabled={homeUsed}
+                    className={`flex-1 p-3 sm:p-4 flex items-center gap-2 sm:gap-3 transition-all cursor-pointer text-left
+                      ${homeSelected
+                        ? 'bg-primary-50 ring-2 ring-inset ring-primary-500'
+                        : homeUsed
+                        ? 'bg-gray-100 opacity-50 cursor-not-allowed'
+                        : 'hover:bg-gray-50'
+                      }
+                    `}
+                  >
+                    {homeTeam.crest_url && (
+                      <img src={homeTeam.crest_url} alt="" className="w-7 h-7 sm:w-8 sm:h-8 object-contain shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">
-                      <p className={`font-semibold ${disabled ? 'line-through text-gray-400' : ''}`}>
-                        {team.name}
+                      <p className={`font-semibold text-sm sm:text-base truncate ${homeUsed ? 'line-through text-gray-400' : ''}`}>
+                        {homeTeam.name}
                       </p>
-                      {team.fixture ? (
-                        <p className="text-xs text-gray-500">
-                          vs {team.fixture.opponent} ({team.fixture.location})
-                        </p>
-                      ) : (
-                        <p className="text-xs text-gray-400">No fixture this GW</p>
-                      )}
+                      {homeUsed && <span className="text-[10px] text-gray-400">Used</span>}
                     </div>
-                    {team.isUsed && (
-                      <span className="text-xs text-gray-400 shrink-0">Used</span>
-                    )}
-                    {isSelected && (
-                      <span className="text-primary-600 text-lg shrink-0">&#10003;</span>
-                    )}
+                    {homeSelected && <span className="text-primary-600 text-lg shrink-0">&#10003;</span>}
+                  </button>
+
+                  {/* VS divider */}
+                  <div className="flex items-center px-2 sm:px-3 bg-gray-50 border-x border-gray-200">
+                    <span className="text-xs font-bold text-gray-400">vs</span>
                   </div>
-                </button>
+
+                  {/* Away team */}
+                  <button
+                    onClick={() => !awayUsed && setSelectedTeam(fixture.away_team_id)}
+                    disabled={awayUsed}
+                    className={`flex-1 p-3 sm:p-4 flex items-center gap-2 sm:gap-3 transition-all cursor-pointer text-left
+                      ${awaySelected
+                        ? 'bg-primary-50 ring-2 ring-inset ring-primary-500'
+                        : awayUsed
+                        ? 'bg-gray-100 opacity-50 cursor-not-allowed'
+                        : 'hover:bg-gray-50'
+                      }
+                    `}
+                  >
+                    {awayTeam.crest_url && (
+                      <img src={awayTeam.crest_url} alt="" className="w-7 h-7 sm:w-8 sm:h-8 object-contain shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className={`font-semibold text-sm sm:text-base truncate ${awayUsed ? 'line-through text-gray-400' : ''}`}>
+                        {awayTeam.name}
+                      </p>
+                      {awayUsed && <span className="text-[10px] text-gray-400">Used</span>}
+                    </div>
+                    {awaySelected && <span className="text-primary-600 text-lg shrink-0">&#10003;</span>}
+                  </button>
+                </div>
               );
             })}
           </div>
+
+          {/* Teams without a fixture this GW */}
+          {teamsWithoutFixture.length > 0 && (
+            <div className="mt-4">
+              <p className="text-xs text-gray-400 mb-2">No fixture this gameweek:</p>
+              <div className="flex flex-wrap gap-2">
+                {teamsWithoutFixture.map(team => (
+                  <span key={team.team_id} className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">
+                    {team.short_name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {selectedTeam && (
             <div className="mt-6 text-center">
