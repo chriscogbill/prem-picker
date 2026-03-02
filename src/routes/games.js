@@ -527,10 +527,24 @@ router.post('/:id/import-pick', requireAuth, requireGameAdmin(), async (req, res
       [id, player.player_id, gameweek, team.team_id, result]
     );
 
+    // If the result is a loss or draw, eliminate the player
+    let statusChanged = false;
+    if (result && result !== 'win') {
+      const updateResult = await pool.query(
+        `UPDATE game_players
+         SET status = 'eliminated', eliminated_gameweek = $1, eliminated_pick_id = $2
+         WHERE player_id = $3 AND status = 'alive'
+         RETURNING player_id`,
+        [gameweek, pickResult.rows[0].pick_id, player.player_id]
+      );
+      statusChanged = updateResult.rows.length > 0;
+    }
+
     res.json({
       success: true,
       pick: pickResult.rows[0],
-      message: `Imported pick: ${player.username} → ${team.name} (GW${gameweek})${result ? ` [${result}]` : ''}`
+      eliminated: statusChanged,
+      message: `Imported pick: ${player.username} → ${team.name} (GW${gameweek})${result ? ` [${result}]` : ''}${statusChanged ? ' — player eliminated' : ''}`
     });
   } catch (error) {
     console.error('Error importing pick:', error);
