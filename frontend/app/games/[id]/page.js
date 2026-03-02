@@ -20,7 +20,7 @@ export default function GameDetailPage() {
   const [processGw, setProcessGw] = useState(currentGameweek || 1);
   const [message, setMessage] = useState('');
   const [copied, setCopied] = useState(false);
-  const [editPickTarget, setEditPickTarget] = useState(null); // { email, gameweek }
+  const [teams, setTeams] = useState([]);
 
   useEffect(() => {
     if (!loading) {
@@ -34,14 +34,16 @@ export default function GameDetailPage() {
 
   async function loadData() {
     try {
-      const [gameData, historyData] = await Promise.all([
+      const [gameData, historyData, teamsData] = await Promise.all([
         api.getGame(id),
-        api.getGameHistory(id)
+        api.getGameHistory(id),
+        api.getPlTeams()
       ]);
       setGame(gameData.game);
       setPlayers(gameData.players);
       setHistory(historyData.history || {});
       setStartGameweek(historyData.startGameweek || gameData.game.start_gameweek || 1);
+      setTeams(teamsData.teams || []);
     } catch (error) {
       console.error('Error loading game:', error);
     } finally {
@@ -103,6 +105,17 @@ export default function GameDetailPage() {
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
+    }
+  }
+
+  async function handleAdminPickChange(playerEmail, gw, teamShortName) {
+    setMessage('');
+    try {
+      const result = await api.importPick(id, playerEmail, gw, teamShortName);
+      setMessage(result.message);
+      loadData();
+    } catch (error) {
+      setMessage(error.message || 'Failed to update pick');
     }
   }
 
@@ -203,8 +216,6 @@ export default function GameDetailPage() {
           setMessage={setMessage}
           loadData={loadData}
           router={router}
-          editPickTarget={editPickTarget}
-          setEditPickTarget={setEditPickTarget}
         />
       )}
 
@@ -262,14 +273,8 @@ export default function GameDetailPage() {
                             gameId={id}
                             router={router}
                             isGameAdmin={isGameAdmin}
-                            onAdminEdit={(playerEmail, gameweek) => {
-                              setEditPickTarget({ email: playerEmail, gameweek });
-                              // Scroll to admin panel
-                              setTimeout(() => {
-                                const adminPanel = document.getElementById('admin-import-pick');
-                                if (adminPanel) adminPanel.scrollIntoView({ behavior: 'smooth' });
-                              }, 100);
-                            }}
+                            teams={teams}
+                            onAdminPickChange={handleAdminPickChange}
                           />
                         );
                       })}
@@ -291,7 +296,7 @@ export default function GameDetailPage() {
   );
 }
 
-function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handleStart, processing, updatingStandings, processGw, setProcessGw, handleProcessResults, handleUpdateStandings, setMessage, loadData, router, editPickTarget, setEditPickTarget }) {
+function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handleStart, processing, updatingStandings, processGw, setProcessGw, handleProcessResults, handleUpdateStandings, setMessage, loadData, router }) {
   const [showManage, setShowManage] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -300,29 +305,6 @@ function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handl
   const [addEmail, setAddEmail] = useState('');
   const [addUsername, setAddUsername] = useState('');
   const [adding, setAdding] = useState(false);
-
-  // Import pick
-  const [pickEmail, setPickEmail] = useState('');
-  const [pickGw, setPickGw] = useState(game.start_gameweek || 1);
-  const [pickTeam, setPickTeam] = useState('');
-  const [importing, setImporting] = useState(false);
-
-  // Handle editPickTarget from clicking on a pick cell
-  useEffect(() => {
-    if (editPickTarget) {
-      setPickEmail(editPickTarget.email);
-      setPickGw(editPickTarget.gameweek);
-      setPickTeam('');
-      setShowManage(true);
-      setEditPickTarget(null);
-    }
-  }, [editPickTarget]);
-
-  // Player status
-  const [statusEmail, setStatusEmail] = useState('');
-  const [statusValue, setStatusValue] = useState('alive');
-  const [statusGw, setStatusGw] = useState('');
-  const [updatingStatus, setUpdatingStatus] = useState(false);
 
   async function handleDelete() {
     setDeleting(true);
@@ -349,33 +331,6 @@ function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handl
       setMessage(error.message || 'Failed to add player');
     } finally {
       setAdding(false);
-    }
-  }
-
-  async function handleImportPick() {
-    setImporting(true);
-    try {
-      const result = await api.importPick(id, pickEmail, pickGw, pickTeam);
-      setMessage(result.message);
-      setPickTeam('');
-      loadData();
-    } catch (error) {
-      setMessage(error.message || 'Failed to import pick');
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  async function handleSetStatus() {
-    setUpdatingStatus(true);
-    try {
-      const result = await api.setPlayerStatus(id, statusEmail, statusValue, statusGw || undefined);
-      setMessage(result.message);
-      loadData();
-    } catch (error) {
-      setMessage(error.message || 'Failed to update status');
-    } finally {
-      setUpdatingStatus(false);
     }
   }
 
@@ -474,102 +429,7 @@ function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handl
             </div>
           </div>
 
-          {/* Import Pick */}
-          <div id="admin-import-pick">
-            <h3 className="text-sm font-semibold mb-2">Import Pick</h3>
-            <div className="flex gap-2 flex-wrap items-end">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Player</label>
-                <select
-                  value={pickEmail}
-                  onChange={(e) => setPickEmail(e.target.value)}
-                  className="px-2 py-1.5 border border-gray-300 rounded text-sm w-44"
-                >
-                  <option value="">Select player</option>
-                  {players.map(p => (
-                    <option key={p.player_id} value={p.user_email}>{p.username}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">GW</label>
-                <select
-                  value={pickGw}
-                  onChange={(e) => setPickGw(parseInt(e.target.value))}
-                  className="px-2 py-1.5 border border-gray-300 rounded text-sm w-20"
-                >
-                  {Array.from({ length: 38 }, (_, i) => i + 1).map(gw => (
-                    <option key={gw} value={gw}>{gw}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Team (e.g. ARS)</label>
-                <input
-                  type="text"
-                  value={pickTeam}
-                  onChange={(e) => setPickTeam(e.target.value.toUpperCase())}
-                  placeholder="ARS"
-                  className="px-2 py-1.5 border border-gray-300 rounded text-sm w-20 uppercase"
-                  maxLength={3}
-                />
-              </div>
-              <button onClick={handleImportPick} disabled={!pickEmail || !pickTeam || importing} className="btn-primary text-sm disabled:bg-gray-400">
-                {importing ? 'Importing...' : 'Import'}
-              </button>
-            </div>
-            <p className="text-xs text-gray-500 mt-1">Auto-calculates result if the fixture is finished.</p>
-          </div>
-
-          {/* Set Player Status */}
-          <div>
-            <h3 className="text-sm font-semibold mb-2">Set Player Status</h3>
-            <div className="flex gap-2 flex-wrap items-end">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Player</label>
-                <select
-                  value={statusEmail}
-                  onChange={(e) => setStatusEmail(e.target.value)}
-                  className="px-2 py-1.5 border border-gray-300 rounded text-sm w-44"
-                >
-                  <option value="">Select player</option>
-                  {players.map(p => (
-                    <option key={p.player_id} value={p.user_email}>{p.username} ({p.status})</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Status</label>
-                <select
-                  value={statusValue}
-                  onChange={(e) => setStatusValue(e.target.value)}
-                  className="px-2 py-1.5 border border-gray-300 rounded text-sm"
-                >
-                  <option value="alive">Alive</option>
-                  <option value="eliminated">Eliminated</option>
-                  <option value="winner">Winner</option>
-                  <option value="drawn">Drawn</option>
-                </select>
-              </div>
-              {statusValue === 'eliminated' && (
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Elim. GW</label>
-                  <input
-                    type="number"
-                    value={statusGw}
-                    onChange={(e) => setStatusGw(e.target.value)}
-                    placeholder="GW"
-                    className="px-2 py-1.5 border border-gray-300 rounded text-sm w-16"
-                    min={1}
-                    max={38}
-                  />
-                </div>
-              )}
-              <button onClick={handleSetStatus} disabled={!statusEmail || updatingStatus} className="btn-primary text-sm disabled:bg-gray-400">
-                {updatingStatus ? 'Updating...' : 'Update'}
-              </button>
-            </div>
-          </div>
+          <p className="text-xs text-gray-500">To edit picks, click on any pick in the standings table below.</p>
 
           {/* Delete Game */}
           <div className="pt-3 border-t border-gray-200">
@@ -598,10 +458,48 @@ function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handl
   );
 }
 
-function PickCell({ pick, gwData, player, gw, isCurrentUser, currentGameweek, gameId, router, isGameAdmin, onAdminEdit }) {
+function PickCell({ pick, gwData, player, gw, isCurrentUser, currentGameweek, gameId, router, isGameAdmin, teams, onAdminPickChange }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
   const isCurrentGw = gw === currentGameweek;
   const deadlineNotPassed = gwData ? !gwData.deadlinePassed : true;
   const canPick = isCurrentUser && isCurrentGw && deadlineNotPassed && player.status === 'alive';
+
+  async function handleSelectTeam(teamShort) {
+    if (!teamShort) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onAdminPickChange(player.user_email, gw, teamShort);
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  }
+
+  // Admin editing mode — show dropdown
+  if (editing && isGameAdmin) {
+    return (
+      <td className="py-1 px-1 text-center">
+        <select
+          autoFocus
+          defaultValue={pick?.team_short || ''}
+          onChange={(e) => handleSelectTeam(e.target.value)}
+          onBlur={() => !saving && setEditing(false)}
+          disabled={saving}
+          className="w-16 sm:w-20 px-0.5 py-0.5 border border-primary-400 rounded text-xs bg-white focus:ring-1 focus:ring-primary-500"
+        >
+          <option value="">-</option>
+          {teams.map(t => (
+            <option key={t.team_id} value={t.short_name}>{t.short_name}</option>
+          ))}
+        </select>
+      </td>
+    );
+  }
 
   // No pick data at all for this gameweek
   if (!pick) {
@@ -619,6 +517,18 @@ function PickCell({ pick, gwData, player, gw, isCurrentUser, currentGameweek, ga
           >
             Pick
           </button>
+        </td>
+      );
+    }
+    // Admin can click empty cells to add a pick
+    if (isGameAdmin) {
+      return (
+        <td
+          className="py-2 px-1 sm:px-2 text-center text-gray-300 text-xs sm:text-sm cursor-pointer hover:bg-primary-50"
+          onClick={() => setEditing(true)}
+          title={`Add pick for ${player.username} GW${gw}`}
+        >
+          -
         </td>
       );
     }
@@ -673,7 +583,7 @@ function PickCell({ pick, gwData, player, gw, isCurrentUser, currentGameweek, ga
       <span
         className={`inline-block px-1 sm:px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${style} ${isGameAdmin ? 'cursor-pointer hover:ring-2 hover:ring-primary-300' : ''}`}
         title={isGameAdmin ? `Click to edit ${player.username}'s GW${gw} pick` : (pick.team_name || '')}
-        onClick={isGameAdmin ? () => onAdminEdit(player.user_email, gw) : undefined}
+        onClick={isGameAdmin ? () => setEditing(true) : undefined}
       >
         {pick.team_short || pick.team_name || '?'}
       </span>
