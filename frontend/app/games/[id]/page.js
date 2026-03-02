@@ -14,7 +14,6 @@ export default function GameDetailPage() {
   const [history, setHistory] = useState({});
   const [startGameweek, setStartGameweek] = useState(1);
   const [loadingData, setLoadingData] = useState(true);
-  const [starting, setStarting] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [updatingStandings, setUpdatingStandings] = useState(false);
   const [processGw, setProcessGw] = useState(currentGameweek || 1);
@@ -48,20 +47,6 @@ export default function GameDetailPage() {
       console.error('Error loading game:', error);
     } finally {
       setLoadingData(false);
-    }
-  }
-
-  async function handleStart() {
-    setStarting(true);
-    setMessage('');
-    try {
-      await api.startGame(id);
-      setMessage('Game started!');
-      loadData();
-    } catch (error) {
-      setMessage(error.message || 'Failed to start game');
-    } finally {
-      setStarting(false);
     }
   }
 
@@ -184,8 +169,7 @@ export default function GameDetailPage() {
         <div>
           <h1 className="text-2xl font-bold">{game.game_name}</h1>
           <p className="text-sm text-gray-500">
-            {game.status === 'open' ? 'Waiting for players' :
-             game.status === 'active' ? `Active - starts GW${game.start_gameweek}` :
+            {game.status === 'active' ? `Active - starts GW${game.start_gameweek}` :
              game.is_draw ? 'Completed - Draw' : 'Completed'}
           </p>
         </div>
@@ -205,8 +189,6 @@ export default function GameDetailPage() {
           players={players}
           copied={copied}
           copyInviteCode={copyInviteCode}
-          starting={starting}
-          handleStart={handleStart}
           processing={processing}
           updatingStandings={updatingStandings}
           processGw={processGw}
@@ -296,7 +278,7 @@ export default function GameDetailPage() {
   );
 }
 
-function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handleStart, processing, updatingStandings, processGw, setProcessGw, handleProcessResults, handleUpdateStandings, setMessage, loadData, router }) {
+function AdminPanel({ game, id, players, copied, copyInviteCode, processing, updatingStandings, processGw, setProcessGw, handleProcessResults, handleUpdateStandings, setMessage, loadData, router }) {
   const [showManage, setShowManage] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -384,12 +366,6 @@ function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handl
       )}
 
       <div className="flex gap-3 flex-wrap items-end">
-        {game.status === 'open' && (
-          <button onClick={handleStart} disabled={starting} className="btn-success disabled:bg-gray-400">
-            {starting ? 'Starting...' : 'Start Game'}
-          </button>
-        )}
-
         {game.status === 'active' && (
           <div className="flex gap-2 items-end flex-wrap">
             <div>

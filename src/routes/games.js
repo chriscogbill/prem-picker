@@ -116,8 +116,8 @@ router.post('/', requireAuth, async (req, res) => {
     const inviteCode = Math.random().toString(36).substring(2, 10).toUpperCase();
 
     const result = await pool.query(
-      `INSERT INTO games (game_name, season, created_by_email, admin_email, invite_code, start_gameweek)
-       VALUES ($1, $2, $3, $3, $4, $5)
+      `INSERT INTO games (game_name, season, created_by_email, admin_email, invite_code, start_gameweek, status)
+       VALUES ($1, $2, $3, $3, $4, $5, 'active')
        RETURNING *`,
       [gameName, season, req.session.email, inviteCode, startGameweek || 1]
     );
