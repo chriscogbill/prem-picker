@@ -116,6 +116,28 @@ export default function GameDetailPage() {
     });
   });
 
+  // Sort players: winners/drawn first, then alive (by wins desc), then eliminated (lasted longest first)
+  const statusOrder = { winner: 0, drawn: 1, alive: 2, eliminated: 3 };
+  const sortedPlayers = [...players].sort((a, b) => {
+    const aOrder = statusOrder[a.status] ?? 2;
+    const bOrder = statusOrder[b.status] ?? 2;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+
+    // Among eliminated players, sort by eliminated_gameweek desc (lasted longest first)
+    if (a.status === 'eliminated' && b.status === 'eliminated') {
+      return (b.eliminated_gameweek || 0) - (a.eliminated_gameweek || 0);
+    }
+
+    // Among alive players, sort by number of wins desc
+    if (a.status === 'alive' && b.status === 'alive') {
+      const aWins = Object.values(pickLookup[a.user_email] || {}).filter(p => p.result === 'win').length;
+      const bWins = Object.values(pickLookup[b.user_email] || {}).filter(p => p.result === 'win').length;
+      if (aWins !== bWins) return bWins - aWins;
+    }
+
+    return 0; // preserve original order as tiebreaker
+  });
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -173,7 +195,7 @@ export default function GameDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {players.map(player => {
+                {sortedPlayers.map(player => {
                   const isEliminated = player.status === 'eliminated';
                   const isWinner = player.status === 'winner';
                   const isDrawn = player.status === 'drawn';
