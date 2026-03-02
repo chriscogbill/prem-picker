@@ -384,12 +384,14 @@ app.post('/api/auth/change-password', async (req, res) => {
 });
 
 // POST /api/auth/forgot-password — Proxy to cogs-auth (unauthenticated, needs email sending)
+// Injects this app's frontend URL so cogs-auth knows where to link the reset email back to
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3004';
 app.post('/api/auth/forgot-password', async (req, res) => {
   try {
     const authResponse = await fetch(`${AUTH_SERVICE_URL}/api/auth/forgot-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body)
+      body: JSON.stringify({ ...req.body, redirectUrl: FRONTEND_URL })
     });
     const data = await authResponse.json();
     res.status(authResponse.status).json(data);
