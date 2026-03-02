@@ -41,6 +41,7 @@ export default function Navigation() {
   ];
 
   const adminItems = [
+    { href: '/admin/games', label: 'All Games' },
     { href: '/admin/settings', label: 'Settings' },
   ];
 
