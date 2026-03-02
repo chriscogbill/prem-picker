@@ -62,6 +62,12 @@ export function AuthProvider({ children }) {
     return response;
   }
 
+  async function setupPassword(email, password) {
+    const response = await api.setupPassword(email, password);
+    setUser(response.user);
+    return response;
+  }
+
   async function logout() {
     await api.logout();
     setUser(null);
@@ -78,7 +84,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, loading, login, register, logout,
+      user, loading, login, register, setupPassword, logout,
       currentSeason, currentGameweek, refreshGameweek
     }}>
       {children}

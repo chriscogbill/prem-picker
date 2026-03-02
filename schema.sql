@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     user_id INTEGER NOT NULL PRIMARY KEY,
     email VARCHAR(255) NOT NULL UNIQUE,
     username VARCHAR(100) NOT NULL,
-    full_name VARCHAR(255)
+    full_name VARCHAR(255),
+    needs_password_setup BOOLEAN DEFAULT FALSE
 );
 
 -- Premier League teams (20 teams per season)

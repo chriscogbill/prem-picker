@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../db/connection');
 const { requireAuth, requireAdmin, requireGameAdmin } = require('../middleware/requireAuth');
 const { getCurrentSeason, getCurrentGameweek, getGameweekOverride, isDeadlineOverridden } = require('../helpers/settings');
+const { ensureUserExists } = require('../helpers/userManager');
 const picksRouter = require('./picks');
 
 // Mount picks routes under /api/games/:id/
@@ -438,27 +439,26 @@ router.post('/:id/add-player', requireAuth, requireGameAdmin(), async (req, res)
       return res.status(409).json({ success: false, error: 'Player is already in this game' });
     }
 
-    // Use provided username, or try to look up from user_profiles, or use email prefix
-    let playerUsername = username;
-    if (!playerUsername) {
-      const profileResult = await pool.query(
-        'SELECT username FROM user_profiles WHERE email = $1',
-        [email]
-      );
-      playerUsername = profileResult.rows[0]?.username || email.split('@')[0];
-    }
+    // Ensure user account exists (auto-creates if needed)
+    const authPool = req.app.locals.authPool;
+    const userInfo = await ensureUserExists(authPool, pool, email, username);
+    const playerUsername = username || userInfo.username;
 
     const result = await pool.query(
       `INSERT INTO game_players (game_id, user_email, username)
        VALUES ($1, $2, $3)
        RETURNING *`,
-      [id, email, playerUsername]
+      [id, email.trim().toLowerCase(), playerUsername]
     );
+
+    const msg = userInfo.created
+      ? `Added ${playerUsername} to the game (account created — they'll need to set a password)`
+      : `Added ${playerUsername} to the game`;
 
     res.status(201).json({
       success: true,
       player: result.rows[0],
-      message: `Added ${playerUsername} to the game`
+      message: msg
     });
   } catch (error) {
     console.error('Error adding player:', error);
@@ -598,13 +598,11 @@ router.post('/:id/bulk-import', requireAuth, requireGameAdmin(), async (req, res
       );
 
       if (playerResult.rows.length === 0) {
-        // Player doesn't exist in game — look up username from user_profiles if not provided
+        // Ensure user account exists (auto-creates if needed)
+        const authPool = req.app.locals.authPool;
+        const userInfo = await ensureUserExists(authPool, pool, trimmedEmail, playerUsername);
         if (!playerUsername) {
-          const profileResult = await client.query(
-            'SELECT username FROM user_profiles WHERE email = $1',
-            [trimmedEmail]
-          );
-          playerUsername = profileResult.rows[0]?.username || trimmedEmail.split('@')[0];
+          playerUsername = userInfo.username;
         }
 
         // Add player to game
