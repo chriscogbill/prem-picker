@@ -231,7 +231,7 @@ export default function PickPage() {
                         {homeTeam.name}
                       </p>
                     </div>
-                    {homeSelected && <span className="text-primary-600 text-lg shrink-0">&#10003;</span>}
+
                   </button>
 
                   {/* VS divider */}
@@ -260,7 +260,7 @@ export default function PickPage() {
                         {awayTeam.name}
                       </p>
                     </div>
-                    {awaySelected && <span className="text-primary-600 text-lg shrink-0">&#10003;</span>}
+
                   </button>
                 </div>
               );
