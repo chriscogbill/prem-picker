@@ -733,4 +733,39 @@ router.post('/:id/set-player-status', requireAuth, requireGameAdmin(), async (re
   }
 });
 
+// POST /api/games/:id/transfer-admin - Transfer game admin to another player (game admin only)
+router.post('/:id/transfer-admin', requireAuth, requireGameAdmin(), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newAdminEmail } = req.body;
+
+    if (!newAdminEmail) {
+      return res.status(400).json({ success: false, error: 'newAdminEmail is required' });
+    }
+
+    // Verify the new admin is a player in this game
+    const playerCheck = await pool.query(
+      'SELECT * FROM game_players WHERE game_id = $1 AND user_email = $2',
+      [id, newAdminEmail]
+    );
+
+    if (playerCheck.rows.length === 0) {
+      return res.status(400).json({ success: false, error: 'That email is not a player in this game' });
+    }
+
+    await pool.query(
+      'UPDATE games SET admin_email = $1 WHERE game_id = $2',
+      [newAdminEmail, id]
+    );
+
+    res.json({
+      success: true,
+      message: `Game admin transferred to ${playerCheck.rows[0].username || newAdminEmail}`
+    });
+  } catch (error) {
+    console.error('Error transferring admin:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 module.exports = router;

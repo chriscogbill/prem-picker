@@ -306,6 +306,10 @@ function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handl
   const [addUsername, setAddUsername] = useState('');
   const [adding, setAdding] = useState(false);
 
+  // Transfer admin
+  const [newAdmin, setNewAdmin] = useState('');
+  const [transferring, setTransferring] = useState(false);
+
   async function handleDelete() {
     setDeleting(true);
     try {
@@ -316,6 +320,21 @@ function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handl
       setConfirmDelete(false);
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function handleTransferAdmin() {
+    if (!newAdmin) return;
+    setTransferring(true);
+    try {
+      const result = await api.transferAdmin(id, newAdmin);
+      setMessage(result.message);
+      setNewAdmin('');
+      loadData();
+    } catch (error) {
+      setMessage(error.message || 'Failed to transfer admin');
+    } finally {
+      setTransferring(false);
     }
   }
 
@@ -430,6 +449,30 @@ function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handl
           </div>
 
           <p className="text-xs text-gray-500">To edit picks, click on any pick in the standings table below.</p>
+
+          {/* Transfer Admin */}
+          <div>
+            <h3 className="text-sm font-semibold mb-2">Transfer Game Admin</h3>
+            <div className="flex gap-2 flex-wrap items-end">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">New Admin</label>
+                <select
+                  value={newAdmin}
+                  onChange={(e) => setNewAdmin(e.target.value)}
+                  className="px-2 py-1.5 border border-gray-300 rounded text-sm w-56"
+                >
+                  <option value="">Select player</option>
+                  {players.filter(p => p.user_email !== game.admin_email).map(p => (
+                    <option key={p.player_id} value={p.user_email}>{p.username} ({p.user_email})</option>
+                  ))}
+                </select>
+              </div>
+              <button onClick={handleTransferAdmin} disabled={!newAdmin || transferring} className="btn-primary text-sm disabled:bg-gray-400">
+                {transferring ? 'Transferring...' : 'Transfer'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">This will make the selected player the game admin. You will lose admin access.</p>
+          </div>
 
           {/* Delete Game */}
           <div className="pt-3 border-t border-gray-200">

@@ -154,6 +154,13 @@ class ApiClient {
     });
   }
 
+  async transferAdmin(gameId, newAdminEmail) {
+    return this.request(`/api/games/${gameId}/transfer-admin`, {
+      method: 'POST',
+      body: JSON.stringify({ newAdminEmail }),
+    });
+  }
+
   // Fixtures
   async getFixtures(gameweek, params = {}) {
     const query = new URLSearchParams(params).toString();
