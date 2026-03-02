@@ -251,12 +251,32 @@ async function runResultsCheck() {
 
 /**
  * Start the cron schedule.
- * Runs every 30 minutes on match days, checking for new results.
+ * Runs at specific times (UK) aligned with typical PL match finish times:
+ *   14:30, 16:00, 16:50, 17:00, 17:15, 18:00, 18:45, 19:30, 20:30, 22:00
+ * Server timezone is UTC, UK is Europe/London (UTC+0 winter / UTC+1 summer BST).
  */
 function startResultsCron() {
-  // Run every 30 minutes
-  cron.schedule('*/30 * * * *', runResultsCheck);
-  console.log('✓ Results cron scheduled (every 30 minutes)');
+  // Schedule each check time in Europe/London timezone
+  const checkTimes = [
+    '30 14 * * *',  // 14:30 — early Saturday 12:30 kickoffs
+    '0 16 * * *',   // 16:00 — Saturday 15:00 kickoffs
+    '50 16 * * *',  // 16:50 — late-finishing 15:00 games
+    '0 17 * * *',   // 17:00 — buffer
+    '15 17 * * *',  // 17:15 — buffer
+    '0 18 * * *',   // 18:00 — Sunday 16:00 kickoffs
+    '45 18 * * *',  // 18:45 — Saturday 17:30 kickoffs
+    '30 19 * * *',  // 19:30 — Sunday 16:30/17:30 kickoffs
+    '30 20 * * *',  // 20:30 — buffer for late finishes
+    '0 22 * * *',   // 22:00 — midweek/Monday/Friday 20:00 kickoffs
+  ];
+
+  const cronOptions = { timezone: 'Europe/London' };
+
+  checkTimes.forEach(schedule => {
+    cron.schedule(schedule, runResultsCheck, cronOptions);
+  });
+
+  console.log(`✓ Results cron scheduled (${checkTimes.length} daily check times, Europe/London)`);
 
   // Also run once on startup (after a short delay to let the server fully initialize)
   setTimeout(runResultsCheck, 10000);
