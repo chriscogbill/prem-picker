@@ -228,7 +228,7 @@ export default function PickPage() {
                   <button
                     onClick={() => !homeUsed && setSelectedTeam(fixture.home_team_id)}
                     disabled={homeUsed}
-                    className={`flex-1 p-3 sm:p-4 flex items-center gap-2 sm:gap-3 transition-all cursor-pointer text-left
+                    className={`flex-1 w-0 p-3 sm:p-4 flex items-center gap-2 sm:gap-3 transition-all cursor-pointer text-left overflow-hidden
                       ${homeSelected
                         ? 'bg-primary-50 ring-2 ring-inset ring-primary-500'
                         : homeUsed
@@ -257,7 +257,7 @@ export default function PickPage() {
                   <button
                     onClick={() => !awayUsed && setSelectedTeam(fixture.away_team_id)}
                     disabled={awayUsed}
-                    className={`flex-1 p-3 sm:p-4 flex items-center gap-2 sm:gap-3 transition-all cursor-pointer text-left
+                    className={`flex-1 w-0 p-3 sm:p-4 flex items-center gap-2 sm:gap-3 transition-all cursor-pointer text-left overflow-hidden
                       ${awaySelected
                         ? 'bg-primary-50 ring-2 ring-inset ring-primary-500'
                         : awayUsed
