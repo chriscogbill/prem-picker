@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
+import AdBanner from '../components/AdBanner';
 
 export default function HomePage() {
   const { user, loading } = useAuth();
@@ -103,6 +104,8 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      <AdBanner adSlot="XXXXXXXXXX" />
 
       {/* Rules */}
       <div className="card">

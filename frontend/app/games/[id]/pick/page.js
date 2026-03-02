@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '../../../../lib/AuthContext';
 import { api } from '../../../../lib/api';
+import AdBanner from '../../../../components/AdBanner';
 
 export default function PickPage() {
   const { id } = useParams();
@@ -175,6 +176,8 @@ export default function PickPage() {
           </p>
         )}
       </div>
+
+      <AdBanner adSlot="XXXXXXXXXX" />
 
       {error && (
         <div className="bg-danger-100 border border-danger-400 text-danger-700 px-4 py-3 rounded">{error}</div>

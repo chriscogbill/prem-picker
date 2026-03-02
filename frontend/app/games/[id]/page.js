@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '../../../lib/AuthContext';
 import { api } from '../../../lib/api';
+import AdBanner from '../../../components/AdBanner';
 
 export default function GameDetailPage() {
   const { id } = useParams();
@@ -200,6 +201,8 @@ export default function GameDetailPage() {
           router={router}
         />
       )}
+
+      <AdBanner adSlot="XXXXXXXXXX" />
 
       {/* Standings Table — gameweek grid */}
       <div className="card">
