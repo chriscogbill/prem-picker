@@ -230,7 +230,6 @@ export default function PickPage() {
                       <p className={`font-semibold text-sm sm:text-base truncate ${homeUsed ? 'line-through text-gray-400' : ''}`}>
                         {homeTeam.name}
                       </p>
-                      {homeUsed && <span className="text-[10px] text-gray-400">Used</span>}
                     </div>
                     {homeSelected && <span className="text-primary-600 text-lg shrink-0">&#10003;</span>}
                   </button>
@@ -260,7 +259,6 @@ export default function PickPage() {
                       <p className={`font-semibold text-sm sm:text-base truncate ${awayUsed ? 'line-through text-gray-400' : ''}`}>
                         {awayTeam.name}
                       </p>
-                      {awayUsed && <span className="text-[10px] text-gray-400">Used</span>}
                     </div>
                     {awaySelected && <span className="text-primary-600 text-lg shrink-0">&#10003;</span>}
                   </button>
