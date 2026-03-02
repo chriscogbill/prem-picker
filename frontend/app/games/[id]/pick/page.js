@@ -296,7 +296,7 @@ export default function PickPage() {
           )}
 
           {selectedTeam && (
-            <div className="mt-6 text-center">
+            <div className="mt-6 text-center hidden sm:block">
               <button
                 onClick={handleSubmit}
                 disabled={submitting}
