@@ -64,6 +64,38 @@ class ApiClient {
     });
   }
 
+  async changePassword(currentPassword, newPassword) {
+    return this.request('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+  }
+
+  async forgotPassword(email) {
+    return this.request('/api/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async resetPassword(token, newPassword) {
+    return this.request('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, newPassword }),
+    });
+  }
+
+  async getUsers() {
+    return this.request('/api/auth/users');
+  }
+
+  async adminResetPassword(userId, newPassword) {
+    return this.request('/api/auth/admin-reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ userId, newPassword }),
+    });
+  }
+
   // Games
   async getGames(params = {}) {
     const query = new URLSearchParams(params).toString();

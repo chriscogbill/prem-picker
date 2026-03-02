@@ -4,6 +4,7 @@ const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const pool = require('./src/db/connection');
 
 // Separate pool for the shared auth/session database (cogsAuth)
@@ -335,6 +336,160 @@ app.post('/api/auth/setup-password', async (req, res) => {
   } catch (error) {
     console.error('Error setting up password:', error);
     res.status(500).json({ success: false, error: 'Password setup failed' });
+  }
+});
+
+// POST /api/auth/change-password — Change own password (authenticated)
+app.post('/api/auth/change-password', async (req, res) => {
+  try {
+    if (!req.session?.userId) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, error: 'Current and new passwords are required' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, error: 'New password must be at least 6 characters' });
+    }
+
+    // Get current password hash
+    const userResult = await authPool.query(
+      'SELECT user_id, password_hash FROM users WHERE user_id = $1',
+      [req.session.userId]
+    );
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    // Verify current password
+    const valid = await bcrypt.compare(currentPassword, userResult.rows[0].password_hash);
+    if (!valid) {
+      return res.status(401).json({ success: false, error: 'Current password is incorrect' });
+    }
+
+    // Hash and update
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await authPool.query(
+      'UPDATE users SET password_hash = $1 WHERE user_id = $2',
+      [newHash, req.session.userId]
+    );
+
+    res.json({ success: true, message: 'Password changed successfully' });
+  } catch (error) {
+    console.error('Error changing password:', error);
+    res.status(500).json({ success: false, error: 'Password change failed' });
+  }
+});
+
+// POST /api/auth/forgot-password — Proxy to cogs-auth (unauthenticated, needs email sending)
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const authResponse = await fetch(`${AUTH_SERVICE_URL}/api/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body)
+    });
+    const data = await authResponse.json();
+    res.status(authResponse.status).json(data);
+  } catch (error) {
+    console.error('Auth proxy error (forgot-password):', error);
+    res.status(502).json({ success: false, error: 'Auth service unavailable' });
+  }
+});
+
+// POST /api/auth/reset-password — Reset password with token (unauthenticated)
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    if (!token || !newPassword) {
+      return res.status(400).json({ success: false, error: 'Token and new password are required' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, error: 'Password must be at least 6 characters' });
+    }
+
+    // Hash the token to compare with stored hash
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const result = await authPool.query(
+      'SELECT user_id, email FROM users WHERE password_reset_token = $1 AND password_reset_expires > NOW()',
+      [hashedToken]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ success: false, error: 'Invalid or expired reset token' });
+    }
+
+    const user = result.rows[0];
+
+    // Update password and clear token
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await authPool.query(
+      'UPDATE users SET password_hash = $1, password_reset_token = NULL, password_reset_expires = NULL WHERE user_id = $2',
+      [newHash, user.user_id]
+    );
+
+    res.json({ success: true, message: 'Password reset successfully' });
+  } catch (error) {
+    console.error('Error resetting password:', error);
+    res.status(500).json({ success: false, error: 'Password reset failed' });
+  }
+});
+
+// GET /api/auth/users — Admin only: list all users
+app.get('/api/auth/users', async (req, res) => {
+  try {
+    if (!req.session?.userId || req.session.role !== 'admin') {
+      return res.status(403).json({ success: false, error: 'Admin access required' });
+    }
+
+    const result = await authPool.query(
+      'SELECT user_id, email, username, role, created_at, last_login FROM users ORDER BY created_at DESC'
+    );
+
+    res.json({ success: true, users: result.rows });
+  } catch (error) {
+    console.error('Error listing users:', error);
+    res.status(500).json({ success: false, error: 'Failed to list users' });
+  }
+});
+
+// POST /api/auth/admin-reset-password — Admin only: reset a user's password
+app.post('/api/auth/admin-reset-password', async (req, res) => {
+  try {
+    if (!req.session?.userId || req.session.role !== 'admin') {
+      return res.status(403).json({ success: false, error: 'Admin access required' });
+    }
+
+    const { userId, newPassword } = req.body;
+    if (!userId || !newPassword) {
+      return res.status(400).json({ success: false, error: 'User ID and new password are required' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, error: 'Password must be at least 6 characters' });
+    }
+
+    // Verify user exists
+    const userResult = await authPool.query(
+      'SELECT user_id, email FROM users WHERE user_id = $1',
+      [userId]
+    );
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await authPool.query(
+      'UPDATE users SET password_hash = $1 WHERE user_id = $2',
+      [newHash, userId]
+    );
+
+    res.json({ success: true, message: `Password reset for ${userResult.rows[0].email}` });
+  } catch (error) {
+    console.error('Error resetting user password:', error);
+    res.status(500).json({ success: false, error: 'Password reset failed' });
   }
 });
 

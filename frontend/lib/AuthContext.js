@@ -68,6 +68,10 @@ export function AuthProvider({ children }) {
     return response;
   }
 
+  async function changePassword(currentPassword, newPassword) {
+    return api.changePassword(currentPassword, newPassword);
+  }
+
   async function logout() {
     await api.logout();
     setUser(null);
@@ -84,7 +88,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, loading, login, register, setupPassword, logout,
+      user, loading, login, register, setupPassword, changePassword, logout,
       currentSeason, currentGameweek, refreshGameweek
     }}>
       {children}
