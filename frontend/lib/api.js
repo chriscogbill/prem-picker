@@ -109,6 +109,13 @@ class ApiClient {
     });
   }
 
+  async updateStandings(gameId, upToGameweek) {
+    return this.request(`/api/games/${gameId}/update-standings`, {
+      method: 'POST',
+      body: JSON.stringify({ upToGameweek }),
+    });
+  }
+
   async deleteGame(id) {
     return this.request(`/api/games/${id}`, { method: 'DELETE' });
   }
@@ -120,10 +127,23 @@ class ApiClient {
     });
   }
 
+  async deletePick(gameId, gameweek, playerEmail) {
+    return this.request(`/api/games/${gameId}/picks/${gameweek}/${encodeURIComponent(playerEmail)}`, {
+      method: 'DELETE',
+    });
+  }
+
   async importPick(gameId, playerEmail, gameweek, teamShortName) {
     return this.request(`/api/games/${gameId}/import-pick`, {
       method: 'POST',
       body: JSON.stringify({ playerEmail, gameweek, teamShortName }),
+    });
+  }
+
+  async bulkImport(gameId, rows, gameweeks) {
+    return this.request(`/api/games/${gameId}/bulk-import`, {
+      method: 'POST',
+      body: JSON.stringify({ rows, gameweeks }),
     });
   }
 

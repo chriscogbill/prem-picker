@@ -8,7 +8,7 @@ import { api } from '../../../lib/api';
 export default function GameDetailPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { user, loading, currentGameweek } = useAuth();
+  const { user, loading, currentGameweek, currentSeason } = useAuth();
   const [game, setGame] = useState(null);
   const [players, setPlayers] = useState([]);
   const [history, setHistory] = useState({});
@@ -16,9 +16,11 @@ export default function GameDetailPage() {
   const [loadingData, setLoadingData] = useState(true);
   const [starting, setStarting] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [updatingStandings, setUpdatingStandings] = useState(false);
   const [processGw, setProcessGw] = useState(currentGameweek || 1);
   const [message, setMessage] = useState('');
   const [copied, setCopied] = useState(false);
+  const [editPickTarget, setEditPickTarget] = useState(null); // { email, gameweek }
 
   useEffect(() => {
     if (!loading) {
@@ -65,13 +67,32 @@ export default function GameDetailPage() {
     setProcessing(true);
     setMessage('');
     try {
+      // First update fixture results from the API
+      setMessage('Fetching latest results from API...');
+      await api.updateResults(currentSeason);
+      // Then process results and apply eliminations
+      setMessage('Processing eliminations...');
       const result = await api.processResults(id, processGw);
       setMessage(result.message);
       loadData();
     } catch (error) {
-      setMessage(error.message || 'Failed to process results');
+      setMessage(error.message || 'Failed to import results');
     } finally {
       setProcessing(false);
+    }
+  }
+
+  async function handleUpdateStandings() {
+    setUpdatingStandings(true);
+    setMessage('');
+    try {
+      const result = await api.updateStandings(id, processGw);
+      setMessage(result.message);
+      loadData();
+    } catch (error) {
+      setMessage(error.message || 'Failed to update standings');
+    } finally {
+      setUpdatingStandings(false);
     }
   }
 
@@ -174,12 +195,16 @@ export default function GameDetailPage() {
           starting={starting}
           handleStart={handleStart}
           processing={processing}
+          updatingStandings={updatingStandings}
           processGw={processGw}
           setProcessGw={setProcessGw}
           handleProcessResults={handleProcessResults}
+          handleUpdateStandings={handleUpdateStandings}
           setMessage={setMessage}
           loadData={loadData}
           router={router}
+          editPickTarget={editPickTarget}
+          setEditPickTarget={setEditPickTarget}
         />
       )}
 
@@ -191,9 +216,9 @@ export default function GameDetailPage() {
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="border-b-2 border-gray-200">
-                  <th className="text-left py-2 px-3 sticky left-0 bg-white z-10 min-w-[140px]">Player</th>
+                  <th className="text-left py-2 px-2 sm:px-3 sticky left-0 bg-white z-10 min-w-[100px] sm:min-w-[140px]">Player</th>
                   {gameweeks.map(gw => (
-                    <th key={gw} className="text-center py-2 px-2 min-w-[70px] whitespace-nowrap">
+                    <th key={gw} className="text-center py-2 px-1 sm:px-2 min-w-[50px] sm:min-w-[70px] whitespace-nowrap text-xs sm:text-sm">
                       GW{gw}
                     </th>
                   ))}
@@ -207,14 +232,16 @@ export default function GameDetailPage() {
 
                   return (
                     <tr key={player.player_id} className="border-b border-gray-100">
-                      <td className={`py-2 px-3 font-medium sticky left-0 bg-white z-10 ${
-                        isEliminated ? 'line-through text-gray-400' :
+                      <td className={`py-2 px-2 sm:px-3 font-medium sticky left-0 bg-white z-10 text-sm sm:text-base ${
                         isWinner ? 'text-warning-600 font-bold' :
-                        isDrawn ? 'text-warning-600' : ''
+                        isDrawn ? 'text-warning-600' :
+                        isEliminated ? 'text-gray-400' : ''
                       }`}>
-                        {player.username}
+                        <span className={isEliminated ? 'line-through' : ''}>
+                          {player.username}
+                        </span>
                         {player.user_email === user?.email && (
-                          <span className="text-xs text-gray-400 ml-1 no-underline">(you)</span>
+                          <span className="text-xs text-gray-400 ml-1">(you)</span>
                         )}
                         {isWinner && <span className="ml-1 text-xs">🏆</span>}
                       </td>
@@ -234,6 +261,15 @@ export default function GameDetailPage() {
                             currentGameweek={currentGameweek}
                             gameId={id}
                             router={router}
+                            isGameAdmin={isGameAdmin}
+                            onAdminEdit={(playerEmail, gameweek) => {
+                              setEditPickTarget({ email: playerEmail, gameweek });
+                              // Scroll to admin panel
+                              setTimeout(() => {
+                                const adminPanel = document.getElementById('admin-import-pick');
+                                if (adminPanel) adminPanel.scrollIntoView({ behavior: 'smooth' });
+                              }, 100);
+                            }}
                           />
                         );
                       })}
@@ -255,7 +291,7 @@ export default function GameDetailPage() {
   );
 }
 
-function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handleStart, processing, processGw, setProcessGw, handleProcessResults, setMessage, loadData, router }) {
+function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handleStart, processing, updatingStandings, processGw, setProcessGw, handleProcessResults, handleUpdateStandings, setMessage, loadData, router, editPickTarget, setEditPickTarget }) {
   const [showManage, setShowManage] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -270,6 +306,17 @@ function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handl
   const [pickGw, setPickGw] = useState(game.start_gameweek || 1);
   const [pickTeam, setPickTeam] = useState('');
   const [importing, setImporting] = useState(false);
+
+  // Handle editPickTarget from clicking on a pick cell
+  useEffect(() => {
+    if (editPickTarget) {
+      setPickEmail(editPickTarget.email);
+      setPickGw(editPickTarget.gameweek);
+      setPickTeam('');
+      setShowManage(true);
+      setEditPickTarget(null);
+    }
+  }, [editPickTarget]);
 
   // Player status
   const [statusEmail, setStatusEmail] = useState('');
@@ -336,12 +383,20 @@ function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handl
     <div className="card bg-gray-50">
       <div className="flex justify-between items-center mb-3">
         <h2 className="font-bold">Admin Controls</h2>
-        <button
-          onClick={() => setShowManage(!showManage)}
-          className="text-xs text-link-600 hover:underline cursor-pointer"
-        >
-          {showManage ? 'Hide Management' : 'Manage Game'}
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={() => router.push(`/games/${id}/manage`)}
+            className="text-xs text-link-600 hover:underline cursor-pointer"
+          >
+            Data Manager
+          </button>
+          <button
+            onClick={() => setShowManage(!showManage)}
+            className="text-xs text-link-600 hover:underline cursor-pointer"
+          >
+            {showManage ? 'Hide Management' : 'Manage Game'}
+          </button>
+        </div>
       </div>
 
       {game.invite_code && (
@@ -362,9 +417,9 @@ function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handl
         )}
 
         {game.status === 'active' && (
-          <div className="flex gap-2 items-end">
+          <div className="flex gap-2 items-end flex-wrap">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Process GW</label>
+              <label className="block text-xs text-gray-500 mb-1">Gameweek</label>
               <select
                 value={processGw}
                 onChange={(e) => setProcessGw(parseInt(e.target.value))}
@@ -375,8 +430,11 @@ function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handl
                 ))}
               </select>
             </div>
-            <button onClick={handleProcessResults} disabled={processing} className="btn-primary text-sm disabled:bg-gray-400">
-              {processing ? 'Processing...' : 'Process Results'}
+            <button onClick={handleProcessResults} disabled={processing || updatingStandings} className="btn-primary text-sm disabled:bg-gray-400" title="Import results from API and apply eliminations for this GW">
+              {processing ? 'Importing...' : 'Import Results'}
+            </button>
+            <button onClick={handleUpdateStandings} disabled={updatingStandings || processing} className="btn-secondary text-sm disabled:bg-gray-400" title="Recalculate all standings from existing picks up to this GW">
+              {updatingStandings ? 'Updating...' : 'Update Standings'}
             </button>
           </div>
         )}
@@ -417,7 +475,7 @@ function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handl
           </div>
 
           {/* Import Pick */}
-          <div>
+          <div id="admin-import-pick">
             <h3 className="text-sm font-semibold mb-2">Import Pick</h3>
             <div className="flex gap-2 flex-wrap items-end">
               <div>
@@ -540,7 +598,7 @@ function AdminPanel({ game, id, players, copied, copyInviteCode, starting, handl
   );
 }
 
-function PickCell({ pick, gwData, player, gw, isCurrentUser, currentGameweek, gameId, router }) {
+function PickCell({ pick, gwData, player, gw, isCurrentUser, currentGameweek, gameId, router, isGameAdmin, onAdminEdit }) {
   const isCurrentGw = gw === currentGameweek;
   const deadlineNotPassed = gwData ? !gwData.deadlinePassed : true;
   const canPick = isCurrentUser && isCurrentGw && deadlineNotPassed && player.status === 'alive';
@@ -549,15 +607,15 @@ function PickCell({ pick, gwData, player, gw, isCurrentUser, currentGameweek, ga
   if (!pick) {
     // If the player was already eliminated before this GW, show empty
     if (player.status === 'eliminated' && player.eliminated_gameweek && gw > player.eliminated_gameweek) {
-      return <td className="py-2 px-2 text-center text-gray-200">—</td>;
+      return <td className="py-2 px-1 sm:px-2 text-center text-gray-200 text-xs sm:text-sm">—</td>;
     }
     // Current user can make a pick for this GW
     if (canPick) {
       return (
-        <td className="py-2 px-2 text-center">
+        <td className="py-2 px-1 sm:px-2 text-center">
           <button
             onClick={() => router.push(`/games/${gameId}/pick`)}
-            className="inline-block px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap bg-primary-500 text-white hover:bg-primary-600 cursor-pointer"
+            className="inline-block px-1.5 sm:px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap bg-primary-500 text-white hover:bg-primary-600 cursor-pointer"
           >
             Pick
           </button>
@@ -565,14 +623,14 @@ function PickCell({ pick, gwData, player, gw, isCurrentUser, currentGameweek, ga
       );
     }
     // Player is alive but hasn't picked yet (or GW hasn't started)
-    return <td className="py-2 px-2 text-center text-gray-300">-</td>;
+    return <td className="py-2 px-1 sm:px-2 text-center text-gray-300 text-xs sm:text-sm">-</td>;
   }
 
   // Pick is hidden (deadline not passed, not own pick)
   if (pick.hidden) {
     return (
-      <td className="py-2 px-2 text-center">
-        <span className="inline-block w-6 h-6 bg-gray-200 rounded text-xs leading-6 text-gray-400" title="Pick hidden until deadline">
+      <td className="py-2 px-1 sm:px-2 text-center">
+        <span className="inline-block w-5 h-5 sm:w-6 sm:h-6 bg-gray-200 rounded text-xs leading-5 sm:leading-6 text-gray-400" title="Pick hidden until deadline">
           ?
         </span>
       </td>
@@ -593,9 +651,9 @@ function PickCell({ pick, gwData, player, gw, isCurrentUser, currentGameweek, ga
   // Current user's own pick, still before deadline — show pick + change option
   if (canPick && !pick.result) {
     return (
-      <td className="py-2 px-2 text-center">
+      <td className="py-2 px-1 sm:px-2 text-center">
         <span
-          className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${style}`}
+          className={`inline-block px-1 sm:px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${style}`}
           title={pick.team_name || ''}
         >
           {pick.team_short || pick.team_name || '?'}
@@ -611,10 +669,11 @@ function PickCell({ pick, gwData, player, gw, isCurrentUser, currentGameweek, ga
   }
 
   return (
-    <td className="py-2 px-2 text-center">
+    <td className="py-2 px-1 sm:px-2 text-center">
       <span
-        className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${style}`}
-        title={pick.team_name || ''}
+        className={`inline-block px-1 sm:px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${style} ${isGameAdmin ? 'cursor-pointer hover:ring-2 hover:ring-primary-300' : ''}`}
+        title={isGameAdmin ? `Click to edit ${player.username}'s GW${gw} pick` : (pick.team_name || '')}
+        onClick={isGameAdmin ? () => onAdminEdit(player.user_email, gw) : undefined}
       >
         {pick.team_short || pick.team_name || '?'}
       </span>

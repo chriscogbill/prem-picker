@@ -197,6 +197,20 @@ export default function PickPage() {
       {!deadlinePassed ? (
         <div>
           <h2 className="font-bold mb-3">Select a team to win:</h2>
+
+          {/* Submit button - shown above fixtures on mobile when a team is selected */}
+          {selectedTeam && (
+            <div className="mb-4 text-center sm:hidden">
+              <button
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="btn-primary px-8 py-3 text-lg w-full disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {submitting ? 'Submitting...' : currentPick ? 'Change Pick' : 'Confirm Pick'}
+              </button>
+            </div>
+          )}
+
           <div className="space-y-3">
             {fixtures.map(fixture => {
               const homeTeam = teamMap[fixture.home_team_id];

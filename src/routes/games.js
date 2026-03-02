@@ -283,6 +283,7 @@ router.get('/:id/history', async (req, res) => {
     const { id } = req.params;
     const season = await getCurrentSeason(pool);
     const requestingUser = req.session?.email;
+    const requestingRole = req.session?.role;
 
     // Use gameweek override if set (testing mode), otherwise auto-detect
     const gwOverride = await getGameweekOverride(pool);
@@ -300,12 +301,13 @@ router.get('/:id/history', async (req, res) => {
     // Check deadline override (testing mode)
     const deadlineOverride = await isDeadlineOverridden(pool);
 
-    // Get the game to know the start_gameweek
-    const gameResult = await pool.query('SELECT start_gameweek FROM games WHERE game_id = $1', [id]);
+    // Get the game to know the start_gameweek and admin
+    const gameResult = await pool.query('SELECT start_gameweek, admin_email FROM games WHERE game_id = $1', [id]);
     if (gameResult.rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Game not found' });
     }
     const startGw = gameResult.rows[0].start_gameweek;
+    const isGameAdmin = requestingUser === gameResult.rows[0].admin_email || requestingRole === 'admin';
 
     // Get deadlines for all gameweeks that have fixtures
     const deadlinesResult = await pool.query(
@@ -349,7 +351,7 @@ router.get('/:id/history', async (req, res) => {
 
       const isOwnPick = row.user_email === requestingUser;
 
-      if (history[gw].deadlinePassed || isOwnPick) {
+      if (history[gw].deadlinePassed || isOwnPick || isGameAdmin) {
         // Show the pick (team visible)
         history[gw].picks.push({
           pick_id: row.pick_id,
@@ -549,6 +551,136 @@ router.post('/:id/import-pick', requireAuth, requireGameAdmin(), async (req, res
   } catch (error) {
     console.error('Error importing pick:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/games/:id/bulk-import - Bulk import players and picks (game admin only)
+router.post('/:id/bulk-import', requireAuth, requireGameAdmin(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { rows: importRows, gameweeks } = req.body;
+
+    if (!importRows || !Array.isArray(importRows) || importRows.length === 0) {
+      return res.status(400).json({ success: false, error: 'rows array is required' });
+    }
+    if (!gameweeks || !Array.isArray(gameweeks)) {
+      return res.status(400).json({ success: false, error: 'gameweeks array is required' });
+    }
+
+    const season = await getCurrentSeason(pool);
+
+    // Get all team short names for lookup
+    const teamsResult = await pool.query(
+      'SELECT team_id, short_name, name FROM pl_teams WHERE season = $1',
+      [season]
+    );
+    const teamLookup = {};
+    teamsResult.rows.forEach(t => {
+      teamLookup[t.short_name.toUpperCase()] = t;
+    });
+
+    await client.query('BEGIN');
+
+    const results = [];
+
+    for (const row of importRows) {
+      const { email, username, picks } = row;
+      if (!email) continue;
+
+      const trimmedEmail = email.trim().toLowerCase();
+      let playerUsername = username?.trim();
+
+      // Check if player already exists in the game
+      let playerResult = await client.query(
+        'SELECT player_id, username FROM game_players WHERE game_id = $1 AND user_email = $2',
+        [id, trimmedEmail]
+      );
+
+      if (playerResult.rows.length === 0) {
+        // Player doesn't exist in game — look up username from user_profiles if not provided
+        if (!playerUsername) {
+          const profileResult = await client.query(
+            'SELECT username FROM user_profiles WHERE email = $1',
+            [trimmedEmail]
+          );
+          playerUsername = profileResult.rows[0]?.username || trimmedEmail.split('@')[0];
+        }
+
+        // Add player to game
+        playerResult = await client.query(
+          `INSERT INTO game_players (game_id, user_email, username) VALUES ($1, $2, $3) RETURNING player_id, username`,
+          [id, trimmedEmail, playerUsername]
+        );
+      } else {
+        playerUsername = playerResult.rows[0].username;
+      }
+
+      const playerId = playerResult.rows[0].player_id;
+      let picksImported = 0;
+
+      // Import picks for each gameweek
+      if (picks && typeof picks === 'object') {
+        for (const [gwStr, teamShort] of Object.entries(picks)) {
+          const gw = parseInt(gwStr);
+          const teamCode = (teamShort || '').trim().toUpperCase();
+          if (!teamCode || !gw) continue;
+
+          const team = teamLookup[teamCode];
+          if (!team) {
+            results.push({ email: trimmedEmail, error: `Unknown team "${teamShort}" for GW${gw}` });
+            continue;
+          }
+
+          // Check fixture and determine result
+          const fixtureResult = await client.query(
+            `SELECT home_team_id, away_team_id, home_score, away_score, status
+             FROM pl_fixtures
+             WHERE (home_team_id = $1 OR away_team_id = $1) AND gameweek = $2 AND season = $3`,
+            [team.team_id, gw, season]
+          );
+
+          let result = null;
+          if (fixtureResult.rows.length > 0 && fixtureResult.rows[0].status === 'finished') {
+            const f = fixtureResult.rows[0];
+            const isHome = f.home_team_id === team.team_id;
+            if (f.home_score > f.away_score) {
+              result = isHome ? 'win' : 'loss';
+            } else if (f.home_score < f.away_score) {
+              result = isHome ? 'loss' : 'win';
+            } else {
+              result = 'draw';
+            }
+          }
+
+          // Upsert pick
+          await client.query(
+            `INSERT INTO picks (game_id, game_player_id, gameweek, pl_team_id, result)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (game_id, game_player_id, gameweek) DO UPDATE SET
+               pl_team_id = EXCLUDED.pl_team_id, result = EXCLUDED.result, created_at = CURRENT_TIMESTAMP`,
+            [id, playerId, gw, team.team_id, result]
+          );
+          picksImported++;
+        }
+      }
+
+      results.push({ email: trimmedEmail, username: playerUsername, picksImported });
+    }
+
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      results,
+      message: `Imported ${results.filter(r => !r.error).length} players with picks`
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error in bulk import:', error);
+    res.status(500).json({ success: false, error: error.message });
+  } finally {
+    client.release();
   }
 });
 

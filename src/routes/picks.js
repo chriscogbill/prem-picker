@@ -229,6 +229,40 @@ router.post('/picks', requireAuth, async (req, res) => {
   }
 });
 
+// DELETE /api/games/:id/picks/:gameweek/:playerEmail - Delete a specific pick (admin only)
+router.delete('/picks/:gameweek/:playerEmail', requireAdmin, async (req, res) => {
+  try {
+    const gameId = req.params.id;
+    const { gameweek, playerEmail } = req.params;
+
+    // Look up game player
+    const playerResult = await pool.query(
+      'SELECT player_id, username FROM game_players WHERE game_id = $1 AND user_email = $2',
+      [gameId, playerEmail]
+    );
+    if (playerResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Player not found in this game' });
+    }
+
+    const result = await pool.query(
+      `DELETE FROM picks WHERE game_id = $1 AND game_player_id = $2 AND gameweek = $3 RETURNING *`,
+      [gameId, playerResult.rows[0].player_id, gameweek]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'No pick found for this player/gameweek' });
+    }
+
+    res.json({
+      success: true,
+      message: `Deleted ${playerResult.rows[0].username}'s pick for GW${gameweek}`
+    });
+  } catch (error) {
+    console.error('Error deleting pick:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // POST /api/games/:id/process-results - Process results for a gameweek (admin only)
 router.post('/process-results', requireAdmin, async (req, res) => {
   const client = await pool.connect();
@@ -400,6 +434,198 @@ router.post('/process-results', requireAdmin, async (req, res) => {
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error processing results:', error);
+    res.status(500).json({ success: false, error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/games/:id/update-standings - Recalculate standings from existing picks (game admin)
+// Useful after manually amending picks. Resets all statuses and replays eliminations.
+router.post('/update-standings', requireAdmin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const gameId = req.params.id;
+    const { upToGameweek } = req.body;
+
+    if (!upToGameweek) {
+      return res.status(400).json({ success: false, error: 'upToGameweek is required' });
+    }
+
+    const season = await getCurrentSeason(pool);
+
+    await client.query('BEGIN');
+
+    // 1. Get game info
+    const gameResult = await client.query('SELECT * FROM games WHERE game_id = $1', [gameId]);
+    if (gameResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, error: 'Game not found' });
+    }
+    const game = gameResult.rows[0];
+    const startGw = game.start_gameweek || 1;
+
+    // 2. Reset all players to alive
+    await client.query(
+      `UPDATE game_players SET status = 'alive', eliminated_gameweek = NULL, eliminated_pick_id = NULL
+       WHERE game_id = $1`,
+      [gameId]
+    );
+
+    // 3. Reset game status
+    await client.query(
+      `UPDATE games SET status = 'active', winner_player_id = NULL, is_draw = FALSE WHERE game_id = $1`,
+      [gameId]
+    );
+
+    // 4. Clear all pick results for this game
+    await client.query(
+      `UPDATE picks SET result = NULL WHERE game_id = $1`,
+      [gameId]
+    );
+
+    let totalEliminated = 0;
+    let finalGameStatus = 'active';
+    let lastProcessedGw = startGw;
+
+    // 5. Replay each gameweek from start to upToGameweek
+    for (let gw = startGw; gw <= upToGameweek; gw++) {
+      // Check if any finished fixtures exist for this GW
+      const fixturesResult = await client.query(
+        `SELECT home_team_id, away_team_id, home_score, away_score
+         FROM pl_fixtures
+         WHERE gameweek = $1 AND season = $2 AND status = 'finished'`,
+        [gw, season]
+      );
+
+      if (fixturesResult.rows.length === 0) continue; // Skip GWs with no finished fixtures
+      lastProcessedGw = gw;
+
+      // Build team results
+      const teamResults = {};
+      for (const f of fixturesResult.rows) {
+        if (f.home_score > f.away_score) {
+          teamResults[f.home_team_id] = 'win';
+          teamResults[f.away_team_id] = 'loss';
+        } else if (f.home_score < f.away_score) {
+          teamResults[f.home_team_id] = 'loss';
+          teamResults[f.away_team_id] = 'win';
+        } else {
+          teamResults[f.home_team_id] = 'draw';
+          teamResults[f.away_team_id] = 'draw';
+        }
+      }
+
+      // Update pick results for this GW
+      const picksResult = await client.query(
+        `SELECT p.pick_id, p.game_player_id, p.pl_team_id
+         FROM picks p
+         WHERE p.game_id = $1 AND p.gameweek = $2`,
+        [gameId, gw]
+      );
+
+      const eliminatedThisGw = [];
+
+      for (const pick of picksResult.rows) {
+        const result = teamResults[pick.pl_team_id] || null;
+        if (result) {
+          await client.query(
+            'UPDATE picks SET result = $1 WHERE pick_id = $2',
+            [result, pick.pick_id]
+          );
+        }
+
+        // Check if player is still alive before eliminating
+        const playerStatus = await client.query(
+          `SELECT status FROM game_players WHERE player_id = $1`,
+          [pick.game_player_id]
+        );
+
+        if (playerStatus.rows[0]?.status === 'alive' && result && result !== 'win') {
+          eliminatedThisGw.push({ playerId: pick.game_player_id, pickId: pick.pick_id });
+        }
+      }
+
+      // Auto-eliminate alive players who didn't pick this GW
+      const alivePlayers = await client.query(
+        `SELECT player_id FROM game_players WHERE game_id = $1 AND status = 'alive'`,
+        [gameId]
+      );
+      const playersWhoPicked = new Set(picksResult.rows.map(p => p.game_player_id));
+      for (const player of alivePlayers.rows) {
+        if (!playersWhoPicked.has(player.player_id)) {
+          eliminatedThisGw.push({ playerId: player.player_id, pickId: null });
+        }
+      }
+
+      // Apply eliminations
+      for (const e of eliminatedThisGw) {
+        await client.query(
+          `UPDATE game_players
+           SET status = 'eliminated', eliminated_gameweek = $1, eliminated_pick_id = $2
+           WHERE player_id = $3 AND status = 'alive'`,
+          [gw, e.pickId, e.playerId]
+        );
+      }
+      totalEliminated += eliminatedThisGw.length;
+
+      // Check for winner/draw
+      const remainingResult = await client.query(
+        `SELECT COUNT(*) AS count FROM game_players WHERE game_id = $1 AND status = 'alive'`,
+        [gameId]
+      );
+      const remaining = parseInt(remainingResult.rows[0].count);
+
+      if (remaining === 1) {
+        const winnerResult = await client.query(
+          `SELECT player_id FROM game_players WHERE game_id = $1 AND status = 'alive'`,
+          [gameId]
+        );
+        await client.query(
+          `UPDATE game_players SET status = 'winner' WHERE player_id = $1`,
+          [winnerResult.rows[0].player_id]
+        );
+        await client.query(
+          `UPDATE games SET status = 'completed', winner_player_id = $1 WHERE game_id = $2`,
+          [winnerResult.rows[0].player_id, gameId]
+        );
+        finalGameStatus = 'completed';
+        break;
+      } else if (remaining === 0) {
+        for (const e of eliminatedThisGw) {
+          await client.query(
+            `UPDATE game_players SET status = 'drawn' WHERE player_id = $1`,
+            [e.playerId]
+          );
+        }
+        await client.query(
+          `UPDATE games SET status = 'completed', is_draw = TRUE WHERE game_id = $1`,
+          [gameId]
+        );
+        finalGameStatus = 'completed';
+        break;
+      }
+    }
+
+    // Final count
+    const finalRemaining = await client.query(
+      `SELECT COUNT(*) AS count FROM game_players WHERE game_id = $1 AND status = 'alive'`,
+      [gameId]
+    );
+    const remaining = parseInt(finalRemaining.rows[0].count);
+
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      totalEliminated,
+      remaining,
+      gameStatus: finalGameStatus,
+      message: `Standings recalculated (GW${startGw}-${upToGameweek}). ${totalEliminated} eliminated, ${remaining} alive.`
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating standings:', error);
     res.status(500).json({ success: false, error: error.message });
   } finally {
     client.release();

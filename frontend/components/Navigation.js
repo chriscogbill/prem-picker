@@ -11,6 +11,7 @@ export default function Navigation() {
   const router = useRouter();
   const { user, logout, currentSeason, currentGameweek } = useAuth();
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
 
   async function handleLogout() {
@@ -48,10 +49,17 @@ export default function Navigation() {
       {/* Top bar */}
       <div className="bg-primary-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-end h-8 items-center">
+          <div className="flex justify-between h-8 items-center">
+            {/* Season/GW on mobile */}
+            <div className="sm:hidden text-xs text-gray-300">
+              {currentGameweek !== null && currentSeason && (
+                <span>{currentSeason}/{(currentSeason + 1).toString().slice(-2)} - GW {currentGameweek}</span>
+              )}
+            </div>
+            <div className="hidden sm:block" />
             {user ? (
               <div className="flex items-center gap-4">
-                <span className="text-sm text-gray-300">
+                <span className="text-sm text-gray-300 hidden sm:inline">
                   Welcome, <span className="font-semibold text-white">{user.username}</span>
                 </span>
                 <button onClick={handleLogout} className="text-sm text-gray-300 hover:text-white cursor-pointer">
@@ -79,6 +87,8 @@ export default function Navigation() {
                   <img src="/logo.svg" alt="PL Picker" className="h-8" />
                 </Link>
               </div>
+
+              {/* Desktop nav links */}
               <div className="hidden sm:ml-8 sm:flex sm:space-x-8 items-center">
                 {navItems.map((item) => (
                   <Link
@@ -141,8 +151,8 @@ export default function Navigation() {
               </div>
             </div>
 
-            {/* Right side - Season/Gameweek */}
-            <div className="flex items-center">
+            {/* Right side - Season/Gameweek (desktop) */}
+            <div className="hidden sm:flex items-center">
               {user?.role === 'admin' ? (
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-1">
@@ -176,8 +186,71 @@ export default function Navigation() {
                 </div>
               )}
             </div>
+
+            {/* Mobile hamburger button */}
+            <div className="flex items-center sm:hidden">
+              <button
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className="inline-flex items-center justify-center p-2 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 cursor-pointer"
+              >
+                {mobileMenuOpen ? (
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                ) : (
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* Mobile menu */}
+        {mobileMenuOpen && (
+          <div className="sm:hidden border-t border-gray-200">
+            <div className="py-2 px-4 space-y-1">
+              {navItems.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`block py-2 px-3 rounded-md text-base font-medium
+                    ${pathname === item.href
+                      ? 'bg-primary-50 text-primary-700'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    }
+                  `}
+                >
+                  {item.label}
+                </Link>
+              ))}
+              {user?.role === 'admin' && adminItems.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`block py-2 px-3 rounded-md text-base font-medium
+                    ${pathname === item.href
+                      ? 'bg-primary-50 text-primary-700'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    }
+                  `}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+            {user && (
+              <div className="border-t border-gray-200 py-2 px-4">
+                <p className="text-sm text-gray-500 px-3 py-1">
+                  Signed in as <span className="font-semibold text-gray-700">{user.username}</span>
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </nav>
   );
